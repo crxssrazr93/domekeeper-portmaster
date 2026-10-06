@@ -15,6 +15,7 @@ chmod +x "tools/godot_adpcm.$DEVICE_ARCH"
 echo "Adapting your copy of Dome Keeper to this device."
 echo "This runs once (and again after a game update)."
 source "$GAMEDIR/tools/portlog.sh"
+mv -f setup_log.txt setup_log.prev.txt 2>/dev/null  # keep the previous setup's log
 port_header "Dome Keeper setup" > setup_log.txt
 port_files domekeeper.pck >> setup_log.txt
 port_log "running the Godot setup script" >> setup_log.txt

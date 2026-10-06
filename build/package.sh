@@ -11,7 +11,8 @@ trap 'rm -rf "$stage"' EXIT
 cp "$src/Dome Keeper.sh" "$stage/"
 cp -r "$src/domekeeper" "$stage/"
 rm -rf "$stage"/domekeeper/*.pck "$stage/domekeeper/cache" "$stage/domekeeper/conf" "$stage/domekeeper/godot" \
-  "$stage/domekeeper/override.cfg" "$stage/domekeeper/log.txt" "$stage/domekeeper/setup_log.txt"
+  "$stage/domekeeper/override.cfg" "$stage/domekeeper/log.txt" "$stage/domekeeper/setup_log.txt" \
+  "$stage/domekeeper/log.prev.txt" "$stage/domekeeper/setup_log.prev.txt"
 cp "$src/port.json" "$src/gameinfo.xml" "$src/screenshot.png" "$src/cover.png" "$stage/domekeeper/"
 cp "$src/README.md" "$stage/domekeeper/domekeeper.md"
 rm -f "$R/domekeeper.zip"

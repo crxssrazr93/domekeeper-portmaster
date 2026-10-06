@@ -14,3 +14,4 @@ port/domekeeper/setup_log.txt
 tests/out/
 *.zip
 __pycache__/
+port/domekeeper/*.prev.txt
