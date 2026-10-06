@@ -47,6 +47,24 @@ Measured on the x86_64 runtime at 640x480 as rss plus swap (the test PC swaps id
 
 The estimated device total in a small map run is about 575 MB, against 1.2 GB plus video memory unmodified. Larger maps add more (see "Still to do").
 
+### Round 3 (crash when a run starts, reported on 1 GB rk3326 and rk3566 devices)
+
+Starting a run crashed on the test device too. On Mali's vendor driver the GPU memory (`/sys/kernel/debug/mali0/gpu_memory`, in pages) reached 482 MB in the level, with 921 MB of RAM in use, and the game died. Measured on the device, small map:
+
+| Build | Level GPU | Level RAM in use | Lobby GPU peak |
+|--|--|--|--|
+| Round 2 | 482 MB, crashed | 921 MB | |
+| + texture factor 3 at 640x480 | about 280 MB | 766 MB | about 450 MB |
+| + ASTC for colour art, map layers at half resolution | 248 MB | 755 MB | 441 MB (a few seconds, while the level builds) |
+
+Godot's own texture counter on the PC: lobby peak 319 MB to 164 MB, level 167 MB to 101 MB.
+
+* **Texture factor.** Textures of 512 px or more are now divided by the ratio between the 1920x1080 design and the screen (3 at 640x480, at least 2, at most 4), instead of always by 2. The launcher passes it to the setup and it is part of the setup stamp, so a different screen size redoes the textures from the original `.ctex` files, which stay in the pack.
+* **ASTC.** Colour art (more than 64 colours, no mipmaps) is halved and compressed to ASTC 4x4 with PortMaster's `astcenc.aarch64` (in the PortMaster folder on every aarch64 firmware), 1 byte per pixel instead of 4. The Mali G31 decodes it in hardware. Palette index art cannot be compressed: its colour values are palette coordinates, and any lossy change reads a different colour. 72 of the 424 scaled textures qualify.
+* **Map layers at half resolution.** `ViewportRocks`, `ViewportLights`, `ViewportBackgroundAlpha` and `ViewportCrackImpact` are map sized render targets. PortTweaks halves each one in `frame_pre_draw`, before its first draw, scales its canvas transform by 0.5 and doubles the sprites that show it. `Map.gd` places background alpha sprites at `size.x / 2`, so that viewport's canvas origin and the sprites already placed are shifted to match. `Map.gd` itself is compiled GDScript (`.gdc`) and is not changed.
+* **Render targets on Mali.** A render target costs about 4.5 times its RGBA size in GPU memory on the vendor driver (r20p0), and `disable_3d` saves only about 1 MB each. Halving a target that has already been drawn gives back much less than its size, since freed GPU memory is not returned promptly.
+* **Korean, Japanese, Chinese.** With these changes Korean reaches a run on the device: the lobby takes about 6 s longer to load (the real font data is loaded and its glyphs are rendered) and needs about 40 MB more.
+
 ### What each change does
 
 * **Lazy music.** The game preloads its soundtrack. Each track under `res://content/music/` is replaced by a `LazyAudioStream` (from PM Porting Tools) that loads the real Ogg only while it plays.
@@ -75,6 +93,8 @@ which aims for half size text, but never shows fewer than 1280x1080 design units
 | 854x480, 1280x720, 1920x1152 | 1.0 |
 
 16:9 screens are already limited by height, so they cannot be scaled up without clipping that panel. `DK_UI_SCALE` in the launcher overrides the result. Checked at all six sizes: title, options, new game popup, run and pause menu (`tests/resolutions.sh`).
+
+The intro's two gradient backgrounds are turned 270 degrees and sized for 16:9. On 4:3 screens they end about 85 design units short of the top, and the map the intro draws underneath (layer -10, to compile the map shaders early) showed through as a blue strip above the bippinbits logo. PortTweaks lengthens them to reach the top edge.
 
 ## 5. How the problems were found
 
@@ -159,7 +179,7 @@ An existing unofficial handheld build ("Extreme Compress Mod", the stock `godot4
 ### What failed on the device and why
 
 1. `gptokeyb2 -x` (a virtual Xbox pad as a mapping workaround) did not create a device as invoked; the renumbered mapping made it unnecessary.
-2. Godot's `--print-fps` printed nothing: the game reroutes `print()`. perfdiag logs to a file instead.
+2. Godot's `--print-fps` printed nothing at first: release builds do not flush stdout on print. The launcher now adds `application/run/flush_stdout_on_print=true` to `override.cfg`, and the frame rate appears in `log.txt`.
 3. Fixed waits before menu presses failed whenever loading took longer; the device scripts wait for the perf log to show the expected scene.
 4. The launcher first compared the setup stamp with the pck's size and date from before the setup, which the setup changes by patching the pck in place: every fresh setup was reported as failed. A rerun on the device passed only because nothing changed; `tests/launchertest.sh` with `FRESH=1` caught it.
 5. On the test PC, `/tmp` is a 20 GB tmpfs: copies of the pck there filled it and truncated files, which showed up as a corrupt pck. Scratch copies now go to disk.
@@ -168,6 +188,6 @@ An existing unofficial handheld build ("Extreme Compress Mod", the stock `godot4
 
 * Memory and frame rate in long runs and on medium to huge maps.
 * Other devices: rk3326 and rk3566 handhelds (ArkOS, ROCKNIX with Panfrost, muOS).
-* Map effect layers are map sized render targets (6 of 7.3 MB on a small map, about 22 MB each on a huge map). Halving them needs changes to `Map.gd`, whose background alpha offsets use the viewport size.
+* The lobby still peaks at about 440 MB of GPU memory for a few seconds while the level builds in the background. `ViewportTopEffects` is still full size.
 * Local splitscreen.
 * Confirm on ROCKNIX with Panfrost.

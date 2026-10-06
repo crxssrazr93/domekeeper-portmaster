@@ -83,7 +83,16 @@ file_stamp() {
 # First run (and again after the game updates its pck): adapt the user's pck to the stock
 # Godot 4.3 runtime and to 1 GB devices. setup/port_setup.gd explains every step; each one
 # skips work already done, so an interrupted run just continues next time.
-pck_stamp="$(file_stamp domekeeper.pck)"
+# Large textures are stored at the screen's scale of the game's 1920x1080 design: the factor is
+# 1 / min(W/1920, H/1080), rounded, from 2 to 4 (3 at 640x480 and 720x720). It is part of the
+# stamp, so another screen size prepares the textures again.
+texture_factor="$(awk -v w="${DISPLAY_WIDTH:-640}" -v h="${DISPLAY_HEIGHT:-480}" 'BEGIN { s = w / 1920; if (h / 1080 < s) s = h / 1080; f = int(1 / s + 0.5); if (f < 2) f = 2; if (f > 4) f = 4; print f }')"
+# Colour art (not palette index art) is stored as ASTC on ARM devices, whose GPUs all decode it,
+# with PortMaster's astcenc; elsewhere it is scaled like the rest.
+texture_astc=""
+[ "$DEVICE_ARCH" = "aarch64" ] && [ -x "$controlfolder/astcenc.aarch64" ] && texture_astc="$controlfolder/astcenc.aarch64"
+texture_mode="$texture_factor ${texture_astc:+astc}"
+pck_stamp="$(file_stamp domekeeper.pck) $texture_mode"
 port_files domekeeper.pck override.cfg
 if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_stamp" ]; then
   port_log "setup: needed (first run or game update; stamp '$(cat cache/.setup_stamp 2>/dev/null)', pck '$pck_stamp')"
@@ -91,7 +100,7 @@ else
   port_log "setup: up to date"
 fi
 if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_stamp" ]; then
-  export GAMEDIR godot_dir godot_executable DEVICE_ARCH controlfolder
+  export GAMEDIR godot_dir godot_executable DEVICE_ARCH controlfolder texture_factor texture_astc texture_mode
   chmod +x "$GAMEDIR/tools/patchscript"
   export PATCHER_FILE="$GAMEDIR/tools/patchscript"
   export PATCHER_GAME="Dome Keeper"
@@ -107,7 +116,7 @@ if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_s
     exit 1
   fi
   # tools/patchscript writes the stamp only on success, from the pck as the setup left it
-  if [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$(file_stamp domekeeper.pck)" ]; then
+  if [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$(file_stamp domekeeper.pck) $texture_mode" ]; then
     port_log "setup failed"
     port_report
     pm_message "Preparing the game failed, see ports/domekeeper/setup_log.txt. To report it, send $PORT_REPORT_FILES."

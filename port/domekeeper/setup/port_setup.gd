@@ -24,12 +24,18 @@ extends MainLoop
 ##   fonts          the CJK fonts (36 MB of font data the game preloads for every language) are
 ##                  repointed to small stand-ins that remember the real file; PortTweaks loads
 ##                  the real data into them when a Chinese, Japanese or Korean language is chosen
-##   textures       textures with a side >= 512 px stored at half resolution (>= 8192 px at a
-##                  quarter, the texture size limit of GLES3 class Mali GPUs) as ScaledTexture,
-##                  which still reports the original size so regions, frame grids and tile
-##                  atlases are unchanged. Sprites are palette index art (their colour values are
-##                  coordinates into a palette texture), so images with few distinct colours are
-##                  resized nearest neighbour; blending would produce wrong palette entries
+##   textures       textures with a side >= 512 px stored at the screen's scale of the 1920x1080
+##                  design (--texture-factor: 3 at 640x480, at least 2, and 4 for sides >= 8192 px,
+##                  the texture size limit of GLES3 class Mali GPUs) as ScaledTexture, which still
+##                  reports the original size so regions, frame grids and tile atlases are
+##                  unchanged. Sprites are palette index art (their colour values are coordinates
+##                  into a palette texture), so images with few distinct colours are resized
+##                  nearest neighbour; blending would produce wrong palette entries, and so would
+##                  lossy compression. Colour art (backgrounds, title images, effects) is drawn
+##                  more magnified and visibly loses detail at a third, so with --astcenc=<astcenc
+##                  binary> (ARM GPUs, which all decode ASTC) it is kept at half size and
+##                  compressed to ASTC 4x4: a quarter of the memory of RGBA, and less than a third
+##                  would take uncompressed
 ## The pack is patched in place (small .import texts appended); game data never leaves it.
 
 const PckPatcher := preload("res://setup/pck_patcher.gd")
@@ -47,12 +53,15 @@ const SAMPLE_MAX_RATE := 22050
 const SAMPLE_MONO_DB := 30.0  # fold to mono when L-R is this far below L+R
 const MUSIC_PREFIX := "res://content/music/"
 const TEXTURE_HALVE_FROM := 512
+const TEXTURE_FACTOR_FILE := "cache/textures/.factor"  # the factor the cached textures were made with
 const TEXTURE_QUARTER_FROM := 8192
 const TEXTURE_INDEX_MAX_COLORS := 64  # at most this many distinct colours: palette index art
 const TEXTURE_SKIP_PREFIX := "res://test/"  # developer test art, never loaded in play
 
 var out_dir := ""
 var encoder := ""
+var texture_factor := 2
+var astcenc := ""  # astcenc binary for colour art, or "" for none
 var pck := PckPatcher.new()
 
 # A plain MainLoop, not a SceneTree: Godot adds the project's autoloads to a SceneTree main loop
@@ -68,6 +77,10 @@ func _initialize() -> void:
 			out_dir = arg.trim_prefix("--out=")
 		elif arg.begins_with("--encoder="):
 			encoder = arg.trim_prefix("--encoder=")
+		elif arg.begins_with("--astcenc="):
+			astcenc = arg.trim_prefix("--astcenc=")
+		elif arg.begins_with("--texture-factor="):
+			texture_factor = clampi(int(arg.trim_prefix("--texture-factor=")), 2, 4)
 	if out_dir == "" or encoder == "":
 		push_error("usage: -- --out=<game folder> --encoder=<godot_adpcm binary>")
 		return
@@ -312,6 +325,26 @@ func is_index_art(img: Image) -> bool:
 				return false
 	return true
 
+## The image as ASTC 4x4 (linear LDR, as Godot samples 2D textures), or null if astcenc failed.
+## A .astc file is a 16 byte header (magic, block size, image size) and the blocks, which are
+## exactly what Image.FORMAT_ASTC_4x4 holds.
+func compress_astc(img: Image) -> Image:
+	var src := out_dir.path_join("cache/textures/.astc_in.png")
+	var dst := out_dir.path_join("cache/textures/.astc_out.astc")
+	var rgba := img.duplicate() as Image
+	rgba.convert(Image.FORMAT_RGBA8)
+	if rgba.save_png(src) != OK:
+		return null
+	DirAccess.remove_absolute(dst)
+	var out := []
+	if OS.execute(astcenc, ["-cl", src, dst, "4x4", "-medium", "-silent"], out, true) != 0:
+		push_error("astcenc failed: %s" % out)
+		return null
+	var data := FileAccess.get_file_as_bytes(dst)
+	if data.size() <= 16 or data.decode_u32(0) != 0x5CA1AB13:
+		return null
+	return Image.create_from_data(img.get_width(), img.get_height(), false, Image.FORMAT_ASTC_4x4, data.slice(16))
+
 ## Header of a .ctex file: {size, data_format, mipmaps, image_at}, or {} if it is not one.
 func read_ctex(ctex_path: String) -> Dictionary:
 	var f := FileAccess.open(ctex_path, FileAccess.READ)
@@ -350,13 +383,25 @@ func scale_textures() -> bool:
 	var scaled_script := load("res://stubs/ScaledTexture.gd")
 	var done := 0
 	var saved := 0
+	var astc_done := 0
+	# A different factor (another screen size) redoes the textures already scaled, from the
+	# original .ctex files, which stay in the pack under their old names.
+	var factor_path := out_dir.path_join(TEXTURE_FACTOR_FILE)
+	var settings := "%d %s" % [texture_factor, "astc" if astcenc != "" else "rgba"]
+	var rescale := FileAccess.get_file_as_string(factor_path).strip_edges() != settings
 	for path in pck.entries:
 		if not (path.ends_with(".png.import") or path.ends_with(".jpg.import") or path.ends_with(".svg.import")) or path.begins_with(TEXTURE_SKIP_PREFIX):
 			continue
 		var imp := read_import(path)
 		var imported: String = imp[1]
+		var cached_path := ""
+		if imported.begins_with("res://%s/" % cache) and imported.ends_with(".res"):
+			if not rescale:
+				continue  # already scaled with this factor
+			cached_path = imported
+			imported = "res://.godot/imported/" + imported.get_file().trim_suffix(".res") + ".ctex"
 		if not imported.ends_with(".ctex"):
-			continue  # already scaled, or a VRAM-compressed variant
+			continue  # a VRAM-compressed variant
 		var ctex := read_ctex(imported)
 		if ctex.is_empty():
 			continue
@@ -370,14 +415,21 @@ func scale_textures() -> bool:
 			img = tex.get_image() if tex else null
 		if img == null or img.is_compressed():
 			continue
-		var factor := 4 if longest >= TEXTURE_QUARTER_FROM else 2
+		var index_art := is_index_art(img)
 		var had_mips: bool = img.has_mipmaps() or ctex["mipmaps"] > 0
+		var use_astc := astcenc != "" and not index_art and not had_mips
+		var factor := maxi(2 if use_astc else texture_factor, 4 if longest >= TEXTURE_QUARTER_FROM else 2)
 		if had_mips:
 			img.clear_mipmaps()
-		var filter := Image.INTERPOLATE_NEAREST if is_index_art(img) else Image.INTERPOLATE_BILINEAR
+		var filter := Image.INTERPOLATE_NEAREST if index_art else Image.INTERPOLATE_BILINEAR
 		img.resize(maxi(1, size.x / factor), maxi(1, size.y / factor), filter)
 		if had_mips:
 			img.generate_mipmaps()
+		if use_astc:
+			var astc := compress_astc(img)
+			if astc != null:
+				img = astc
+				astc_done += 1
 		var scaled = scaled_script.new()
 		scaled.set_image(img)
 		scaled.display_size = size
@@ -385,12 +437,18 @@ func scale_textures() -> bool:
 		if ResourceSaver.save(scaled, out_dir.path_join(cache + "/" + name)) != OK:
 			push_error("cannot save " + name)
 			return false
-		var new_text: String = imp[0].replace('path="%s"' % imported, 'path="res://%s/%s"' % [cache, name])
-		new_text = new_text.replace('type="CompressedTexture2D"', 'type="ImageTexture"')
-		pck.replace(path, new_text.to_utf8_buffer())
+		if cached_path == "":
+			var new_text: String = imp[0].replace('path="%s"' % imported, 'path="res://%s/%s"' % [cache, name])
+			new_text = new_text.replace('type="CompressedTexture2D"', 'type="ImageTexture"')
+			pck.replace(path, new_text.to_utf8_buffer())
 		saved += size.x * size.y * 4 - img.get_data().size()
 		done += 1
 		if done % 50 == 0:
 			printerr("PORT_SETUP: textures %d scaled" % done)
-	printerr("PORT_SETUP: textures scaled=%d saved=%d MB (decoded)" % [done, saved / 1048576])
+	DirAccess.remove_absolute(out_dir.path_join("cache/textures/.astc_in.png"))
+	DirAccess.remove_absolute(out_dir.path_join("cache/textures/.astc_out.astc"))
+	var ff := FileAccess.open(factor_path, FileAccess.WRITE)
+	ff.store_string(settings)
+	ff.close()
+	printerr("PORT_SETUP: textures scaled=%d (factor %d, %d as ASTC) saved=%d MB" % [done, texture_factor, astc_done, saved / 1048576])
 	return true

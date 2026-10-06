@@ -9,6 +9,9 @@ extends Node
 ## the setup could not reach are emptied here as they enter the tree.
 const DEFERRED_TEXT_PANELS := ["PatchNotesPanel", "CreditsPanel"]
 
+## Intro stage backgrounds that must cover the whole screen (see _cover_intro_background)
+const INTRO_BACKGROUNDS := ["Background", "Background2"]
+
 ## CJK fonts (about 36 MB of font data) are preloaded by the game's scripts for every language.
 ## setup/port_setup.gd points them at small stand-ins that remember the real file; when the
 ## language needs them, the real data is loaded into the same objects, so every reference the
@@ -33,6 +36,27 @@ var _cjk_loaded := false
 const BUNDLE_TRACKER := "BundleResourceTracker"
 const BUNDLE_KEEPER := "keeper2"
 var _bundle_trackers: Array[Node] = []
+
+## The map renders its rock paint, crack impacts and lights into map-sized render targets at one
+## pixel per world unit (3024x936 in the singleplayer lobby, 1344x1392 on a small map; Godot also
+## keeps copy buffers for them, so the lobby's cost ~86 MB). The screen shows the world at a third
+## of that on 640x480, so these four are rendered at half size: the viewport is halved and its
+## canvas scaled by 1/2, so everything drawn into it keeps its world coordinates, and the sprites
+## that show the result are scaled by 2. Shaders read them by UV, which does not change. On Mali
+## a render target costs about 4.5 times its colour pixels (depth and driver buffers), so this is
+## the largest single saving in the lobby. Map.addSpriteToBGAlpha places sprites in the
+## background alpha layer at an offset of size.x / 2; with the size halved that offset is a quarter
+## of the full width short, which the canvas transform adds back (full width / 8 after scaling).
+## Sprites it added before the halving are moved to the same convention.
+## The check runs right before each frame is drawn, so a layer the map has just sized is halved
+## before it is ever rendered at full size (the stage's load peak is what runs out of memory).
+const HALF_RES_LAYERS := {
+	"ViewportRocks": ["BackgroundRender/BackgroundSprite", "TileRender/MainStones"],
+	"ViewportCrackImpact": [],
+	"ViewportLights": ["LightSprite"],
+	"ViewportBackgroundAlpha": [],
+}
+var _layers: Array[SubViewport] = []
 
 ## The map's rock and cave background layers are drawn by two big per-pixel shaders, and the
 ## single core Mali G31 of h700 devices spends most of a frame on them (mine at 640x480: about
@@ -169,6 +193,36 @@ func _update_bundle_trackers() -> void:
 		if viewport.size != target and (viewport.size == full or viewport.size == Vector2i(2, 2)):
 			viewport.size = target
 
+func _halve_map_layers() -> void:
+	if _layers.is_empty():
+		return
+	_layers = _layers.filter(func(v): return is_instance_valid(v))
+	for viewport in _layers:
+		# the game sized it (first time or again): halve that size
+		if viewport.size == viewport.get_meta("port_half", Vector2i.ZERO) or viewport.size.x < 64:
+			continue
+		var full := viewport.size
+		var half := (full + Vector2i.ONE) / 2
+		viewport.size = half
+		viewport.set_meta("port_half", half)
+		if viewport.has_meta("port_scaled"):
+			continue
+		viewport.set_meta("port_scaled", true)
+		var shrink := Transform2D().scaled(Vector2(0.5, 0.5))
+		if viewport.name == "ViewportBackgroundAlpha":
+			shrink.origin.x = full.x / 8.0
+			# sprites the map added before this point used the full-width offset
+			var images := viewport.get_node_or_null("AlphaImages")
+			for sprite in images.get_children() if images else []:
+				if sprite is Node2D:
+					sprite.position.x -= full.x / 4.0
+		viewport.canvas_transform = shrink * viewport.canvas_transform
+		var map := viewport.get_parent()
+		for path in HALF_RES_LAYERS[str(viewport.name)]:
+			var shown := map.get_node_or_null(path)
+			if shown is Node2D or shown is Control:
+				shown.scale *= 2.0
+
 func _assessor_playing() -> bool:
 	var level := get_node_or_null("/root/Level")
 	if level == null or not ("loadout" in level) or level.loadout == null:
@@ -197,6 +251,7 @@ func _load_cjk_fonts() -> void:
 func _enter_tree() -> void:
 	_patch_map_shaders()
 	get_tree().node_added.connect(_on_node_added)
+	RenderingServer.frame_pre_draw.connect(_halve_map_layers)
 	_apply_ui_scale()
 	get_tree().root.size_changed.connect(_apply_ui_scale)
 
@@ -227,11 +282,26 @@ func _apply_ui_scale() -> void:
 func _on_node_added(node: Node) -> void:
 	if node.name == BUNDLE_TRACKER:
 		_bundle_trackers.append(node)
+	elif node is SubViewport and str(node.name) in HALF_RES_LAYERS:
+		_layers.append(node)
+	elif node is TextureRect and str(node.name) in INTRO_BACKGROUNDS and node.owner and node.owner.name == "Intro":
+		node.resized.connect(_cover_intro_background.bind(node))
+		_cover_intro_background.call_deferred(node)
 	if node is Label and not node.has_meta("port_text") and node.text != "" and _in_deferred_panel(node):
 		node.set_meta("port_text", node.text)
 		node.text = ""
 	elif node.name in DEFERRED_TEXT_PANELS and node is CanvasItem:
 		node.visibility_changed.connect(_on_deferred_panel_visibility.bind(node))
+
+## The intro's gradient backgrounds are turned 270 degrees and laid out for 16:9. On a 4:3
+## screen they end short of the top edge, and the map the intro draws behind them (to compile
+## its shaders early) shows through as a blue strip. They are lengthened to reach the top.
+func _cover_intro_background(rect: TextureRect) -> void:
+	if not is_equal_approx(rect.rotation_degrees, 270.0):
+		return
+	var top := rect.position.y - rect.size.x  # turned 270 degrees, the width runs upwards
+	if top > 0.0:
+		rect.size.x += top
 
 func _in_deferred_panel(node: Node) -> bool:
 	var p := node.get_parent()

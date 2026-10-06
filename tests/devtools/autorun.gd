@@ -1,5 +1,5 @@
 extends Node
-# Test-only autoload: with --autorun=<regular-small|regular-medium|regular-large|regular-huge>,
+# Test-only autoload: with --autorun=<regular-small|regular-medium|regular-large|regular-huge|lobby>,
 # start a run from the loadout stage as soon as it is up.
 var size := ""
 var done := false
@@ -31,6 +31,8 @@ func _process(_d: float) -> void:
 	if stage == null:
 		return
 	done = true
+	if size == "lobby":
+		return  # --autorun=lobby: walk into the singleplayer lobby and stay there
 	await get_tree().create_timer(6.0).timeout
 	stage.gameModeSelected("relichunt")
 	await get_tree().create_timer(2.0).timeout
