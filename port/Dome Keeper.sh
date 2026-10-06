@@ -34,6 +34,11 @@ weston_runtime="weston_pkg_0.2"
 
 cd "$GAMEDIR"
 > "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
+# Device, system and memory details for bug reports (tools/portlog.sh)
+# The files a bug report needs; named in log.txt and on screen only when something fails
+export PORT_REPORT_FILES="ports/domekeeper/log.txt and setup_log.txt"
+source "$GAMEDIR/tools/portlog.sh"
+port_header "Dome Keeper launcher"
 mkdir -p "$CONFDIR"
 
 # The game data comes from the user's own copy: domekeeper.pck from the Steam Linux build
@@ -65,6 +70,8 @@ if [[ "$PM_CAN_MOUNT" != "N" ]]; then
 fi
 $ESUDO mount "$controlfolder/libs/${godot_runtime}.squashfs" "$godot_dir"
 $ESUDO mount "$controlfolder/libs/${weston_runtime}.squashfs" "$weston_dir"
+port_mounted "$godot_runtime" "$godot_dir/$godot_executable"
+port_mounted "$weston_runtime" "$weston_dir/westonwrap.sh"
 
 # Size and modification time of each file, as "stat -c '%s %Y'" prints them (muOS has no stat)
 file_stamp() {
@@ -77,13 +84,20 @@ file_stamp() {
 # Godot 4.3 runtime and to 1 GB devices. setup/port_setup.gd explains every step; each one
 # skips work already done, so an interrupted run just continues next time.
 pck_stamp="$(file_stamp domekeeper.pck)"
+port_files domekeeper.pck override.cfg
 if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_stamp" ]; then
-  export GAMEDIR godot_dir godot_executable DEVICE_ARCH
+  port_log "setup: needed (first run or game update; stamp '$(cat cache/.setup_stamp 2>/dev/null)', pck '$pck_stamp')"
+else
+  port_log "setup: up to date"
+fi
+if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_stamp" ]; then
+  export GAMEDIR godot_dir godot_executable DEVICE_ARCH controlfolder
   chmod +x "$GAMEDIR/tools/patchscript"
   export PATCHER_FILE="$GAMEDIR/tools/patchscript"
   export PATCHER_GAME="Dome Keeper"
   export PATCHER_TIME="3 to 10 minutes"
   if [ -f "$controlfolder/utils/patcher.txt" ]; then
+    port_log "running the setup (tools/patchscript), its log is setup_log.txt"
     source "$controlfolder/utils/patcher.txt"
   else
     pm_message "This port requires the latest version of PortMaster."
@@ -94,7 +108,9 @@ if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_s
   fi
   # tools/patchscript writes the stamp only on success, from the pck as the setup left it
   if [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$(file_stamp domekeeper.pck)" ]; then
-    pm_message "Preparing the game failed, see ports/domekeeper/setup_log.txt."
+    port_log "setup failed"
+    port_report
+    pm_message "Preparing the game failed, see ports/domekeeper/setup_log.txt. To report it, send $PORT_REPORT_FILES."
     sleep 8
     $ESUDO umount "$godot_dir" "$weston_dir" 2>/dev/null
     pm_finish
@@ -165,21 +181,18 @@ else
 fi
 pm_platform_helper "$godot_dir/$godot_executable"
 export SDL_GAMECONTROLLERCONFIG="$godot_mapping"
+port_log "controller mapping for the game: $(printf '%s\n' "$SDL_GAMECONTROLLERCONFIG" | head -n 1)"
 
-# Device and memory at start and exit, for reports from devices that run out of memory
-mem_report() { echo "PORT_MEM ($1): $(awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/ { printf "%s %d MB  ", $1, $2 / 1024 }' /proc/meminfo)"; }
-echo "PORT_DEVICE: ${CFW_NAME} ${CFW_VERSION} ${DEVICE_NAME} ${DEVICE_CPU} ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}"
-mem_report start
-
+port_log "starting the game, UI scale ${DK_UI_SCALE:-automatic}"
 # westonwrap replaces XDG_RUNTIME_DIR; pass the real one on so ALSA can reach PipeWire for sound.
 REAL_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # DK_UI_SCALE overrides the automatic UI scale (1.33 at 640x480 and 720x720, 1.19 at 480x320, 1.0 on 16:9 screens).
 $ESUDO env $weston_dir/westonwrap.sh headless noop kiosk crusty_x11egl \
   LD_PRELOAD= XDG_DATA_HOME="$CONFDIR" XDG_RUNTIME_DIR="$REAL_XDG_RUNTIME_DIR" DK_UI_SCALE="${DK_UI_SCALE:-0}" \
   "$godot_dir/$godot_executable" --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" -f \
-  --rendering-driver opengl3_es --audio-driver ALSA --main-pack "$GAMEDIR/domekeeper.pck"
+  --rendering-driver opengl3_es --audio-driver ALSA --print-fps --main-pack "$GAMEDIR/domekeeper.pck"
 
-mem_report exit
+port_exit
 $ESUDO $weston_dir/westonwrap.sh cleanup
 if [[ "$PM_CAN_MOUNT" != "N" ]]; then
   $ESUDO umount "$godot_dir"

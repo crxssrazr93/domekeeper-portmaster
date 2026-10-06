@@ -24,6 +24,10 @@ Buttons are named as the game's prompts show them. On Knulli they act as labelle
 * Set `DK_UI_SCALE` (for example `export DK_UI_SCALE=1.25`) at the top of `Dome Keeper.sh` to change the UI scale.
 * No game files are included. All patches are made on your device.
 
+## Reporting problems
+
+Please send `ports/domekeeper/log.txt` and `ports/domekeeper/setup_log.txt`. `log.txt` is rewritten on every start, so copy it right after the problem happens. Lines starting with `PORT:` list the device, firmware, screen, memory and swap, the state of the setup, and at the end how long the game ran and whether the system ran out of memory.
+
 ## Thanks
 
 Bippinbits for the game, the Godot Engine developers, Knifethrower for the PM Porting Tools, and the PortMaster team.
