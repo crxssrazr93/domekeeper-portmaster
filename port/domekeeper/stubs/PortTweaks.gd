@@ -37,26 +37,45 @@ const BUNDLE_TRACKER := "BundleResourceTracker"
 const BUNDLE_KEEPER := "keeper2"
 var _bundle_trackers: Array[Node] = []
 
-## The map renders its rock paint, crack impacts and lights into map-sized render targets at one
-## pixel per world unit (3024x936 in the singleplayer lobby, 1344x1392 on a small map; Godot also
-## keeps copy buffers for them, so the lobby's cost ~86 MB). The screen shows the world at a third
-## of that on 640x480, so these four are rendered at half size: the viewport is halved and its
-## canvas scaled by 1/2, so everything drawn into it keeps its world coordinates, and the sprites
-## that show the result are scaled by 2. Shaders read them by UV, which does not change. On Mali
-## a render target costs about 4.5 times its colour pixels (depth and driver buffers), so this is
-## the largest single saving in the lobby. Map.addSpriteToBGAlpha places sprites in the
-## background alpha layer at an offset of size.x / 2; with the size halved that offset is a quarter
-## of the full width short, which the canvas transform adds back (full width / 8 after scaling).
-## Sprites it added before the halving are moved to the same convention.
-## The check runs right before each frame is drawn, so a layer the map has just sized is halved
-## before it is ever rendered at full size (the stage's load peak is what runs out of memory).
+## The map renders its rock paint, crack impacts, lights, background alpha and top effects into
+## map-sized render targets at one pixel per world unit (3024x936 in the singleplayer lobby). The
+## screen shows the world at a third of that on 640x480, so they are rendered at half size.
+## HalfViewport.gd (put on each layer as it enters the tree) applies half of the sizes the game
+## sets through untyped access, so those render targets are never allocated at full size; the
+## others are halved right before the frame that would first draw them. On Mali a render target
+## costs about 4.5 times its colour pixels and the vendor driver keeps memory it once allocated. Once a layer
+## has its map size, its canvas is scaled by 1/2, so everything drawn into it keeps its world
+## coordinates, and the sprites that show it are scaled by 2. Shaders read them by UV, which does
+## not change. Map.addSpriteToBGAlpha places sprites in the background alpha layer at an offset of
+## size.x / 2, which with the halved size is a quarter of the full width short; the canvas
+## transform adds that back (full width / 8 after scaling), and sprites placed while the layer was
+## still full size are moved to the same convention.
 const HALF_RES_LAYERS := {
 	"ViewportRocks": ["BackgroundRender/BackgroundSprite", "TileRender/MainStones"],
 	"ViewportCrackImpact": [],
 	"ViewportLights": ["LightSprite"],
 	"ViewportBackgroundAlpha": [],
+	"ViewportTopEffects": ["PixelatedEffects"],
 }
 var _layers: Array[SubViewport] = []
+const HALF_VIEWPORT: GDScript = preload("res://stubs/HalfViewport.gd")
+const TINY_VIEWPORT: GDScript = preload("res://stubs/TinyViewport.gd")
+var _sub_scripts := {}  # [game script, port script] -> subclass of the game's with the port's code
+
+## The port's viewport script for a node without a script; for one with a script of the game's
+## (ViewportRocks, MapLights), a subclass of that script with the same code, so the game's code
+## keeps working
+func _viewport_script(current: Script, code: GDScript) -> Script:
+	if current == null:
+		return code
+	if current == code or _sub_scripts.values().has(current):
+		return current
+	var key := [current, code]
+	if not _sub_scripts.has(key):
+		var sub := GDScript.new()
+		sub.source_code = 'extends "%s"\n' % current.resource_path + code.source_code.substr(code.source_code.find("\n"))
+		_sub_scripts[key] = sub if sub.reload() == OK else null
+	return _sub_scripts[key] if _sub_scripts[key] else current
 
 ## The map's rock and cave background layers are drawn by two big per-pixel shaders, and the
 ## single core Mali G31 of h700 devices spends most of a frame on them (mine at 640x480: about
@@ -191,31 +210,45 @@ func _update_bundle_trackers() -> void:
 			continue
 		var target := full if needed else Vector2i(2, 2)
 		if viewport.size != target and (viewport.size == full or viewport.size == Vector2i(2, 2)):
+			viewport.set("_applying", true)  # past TinyViewport's 2x2
 			viewport.size = target
+			viewport.set("_applying", false)
 
 func _halve_map_layers() -> void:
 	if _layers.is_empty():
 		return
 	_layers = _layers.filter(func(v): return is_instance_valid(v))
 	for viewport in _layers:
-		# the game sized it (first time or again): halve that size
-		if viewport.size == viewport.get_meta("port_half", Vector2i.ZERO) or viewport.size.x < 64:
+		# Map.gd sets most layers through typed references, which HalfViewport's _set does not
+		# see; those are halved here, before the frame that would first draw them. Each axis
+		# separately, since only the width of ViewportTopEffects is set again.
+		var half: Vector2i = viewport.get_meta("port_half", Vector2i(-1, -1))
+		var full: Vector2i = viewport.get_meta("port_full", viewport.size)
+		if viewport.size != half and viewport.size.x >= 64:
+			if viewport.size.x != half.x:
+				full.x = viewport.size.x
+			if viewport.size.y != half.y:
+				full.y = viewport.size.y
+			half = (full + Vector2i.ONE) / 2
+			viewport.set_meta("port_full", full)
+			viewport.set_meta("port_half", half)
+			viewport.set("_applying", true)
+			viewport.size = half
+			viewport.set("_applying", false)
+			if viewport.name == "ViewportBackgroundAlpha" and not viewport.has_meta("port_scaled"):
+				# sprites the map added while the layer was full size used the full-width offset
+				var images := viewport.get_node_or_null("AlphaImages")
+				for sprite in images.get_children() if images else []:
+					if sprite is Node2D:
+						sprite.position.x -= full.x / 4.0
+		if full.x < 64 or viewport.size != half:
 			continue
-		var full := viewport.size
-		var half := (full + Vector2i.ONE) / 2
-		viewport.size = half
-		viewport.set_meta("port_half", half)
 		if viewport.has_meta("port_scaled"):
 			continue
 		viewport.set_meta("port_scaled", true)
 		var shrink := Transform2D().scaled(Vector2(0.5, 0.5))
 		if viewport.name == "ViewportBackgroundAlpha":
 			shrink.origin.x = full.x / 8.0
-			# sprites the map added before this point used the full-width offset
-			var images := viewport.get_node_or_null("AlphaImages")
-			for sprite in images.get_children() if images else []:
-				if sprite is Node2D:
-					sprite.position.x -= full.x / 4.0
 		viewport.canvas_transform = shrink * viewport.canvas_transform
 		var map := viewport.get_parent()
 		for path in HALF_RES_LAYERS[str(viewport.name)]:
@@ -282,7 +315,10 @@ func _apply_ui_scale() -> void:
 func _on_node_added(node: Node) -> void:
 	if node.name == BUNDLE_TRACKER:
 		_bundle_trackers.append(node)
+	elif node is SubViewport and node.get_parent() and node.get_parent().name == BUNDLE_TRACKER:
+		node.set_script(_viewport_script(node.get_script(), TINY_VIEWPORT))
 	elif node is SubViewport and str(node.name) in HALF_RES_LAYERS:
+		node.set_script(_viewport_script(node.get_script(), HALF_VIEWPORT))
 		_layers.append(node)
 	elif node is TextureRect and str(node.name) in INTRO_BACKGROUNDS and node.owner and node.owner.name == "Intro":
 		node.resized.connect(_cover_intro_background.bind(node))

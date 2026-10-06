@@ -316,9 +316,13 @@ func defer_panel_text() -> bool:
 ## are not re-saved through Godot because their scripts do not compile without the game's
 ## autoloads, which the setup does not have.
 const VARIANT_VECTOR2I := 45
+## The world and UI viewports (ViewportContainer, LandingStage) are saved at 1920x1080 and sized to
+## the screen by their scripts or containers on their first frame.
 const SMALL_VIEWPORTS := {
 	"res://content/map/Map.tscn": Vector2i(2048, 2048),
 	"res://content/keeper/keeper2/BundleResourceTracker.tscn": Vector2i(2000, 2000),
+	"res://systems/camera/ViewportContainer.tscn": Vector2i(1920, 1080),
+	"res://stages/landing/LandingStage.tscn": Vector2i(1920, 1080),
 }
 
 func vector2i_bytes(v: Vector2i) -> PackedByteArray:
