@@ -1,0 +1,44 @@
+{
+    "version": 4,
+    "name": "domekeeper.zip",
+    "items": [
+        "Dome Keeper.sh",
+        "domekeeper"
+    ],
+    "items_opt": [],
+    "attr": {
+        "title": "Dome Keeper",
+        "porter": [
+            "crxssrazr93"
+        ],
+        "desc": "Defend against waves of alien monsters in this unique roguelike action miner. Dig for resources, collect useful gadgets, and upgrade equipment to increase odds of survival. Just hurry back before your dome is destroyed!",
+        "desc_md": null,
+        "inst": "Purchase the game on Steam and copy domekeeper.pck from the game's installation folder (Steam: Manage, Browse local files) into ports/domekeeper/. The first start prepares the game for your device, which takes a while and needs about 350 MB of extra space.",
+        "inst_md": "Purchase the game on [Steam](https://store.steampowered.com/app/1637320/Dome_Keeper/) and copy `domekeeper.pck` from the game's installation folder (Steam: Manage, Browse local files) into `ports/domekeeper/`. The first start prepares the game for your device, which takes a while and needs about 350 MB of extra space.",
+        "genres": [
+            "action",
+            "strategy"
+        ],
+        "image": null,
+        "rtr": false,
+        "exp": false,
+        "runtime": [
+            "godot_4.3.squashfs",
+            "weston_pkg_0.2.squashfs"
+        ],
+        "store": [
+            {
+                "name": "Steam",
+                "gameurl": "https://store.steampowered.com/app/1637320/Dome_Keeper/",
+                "developerurl": "https://bippinbits.com"
+            }
+        ],
+        "availability": "paid",
+        "reqs": [],
+        "arch": [
+            "aarch64",
+            "x86_64"
+        ],
+        "min_glibc": ""
+    }
+}

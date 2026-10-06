@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./Dome Keeper.sh</path>
+    <name>Dome Keeper</name>
+    <desc>Defend against waves of alien monsters in this unique roguelike action miner. Dig for resources, collect useful gadgets, and upgrade equipment to increase odds of survival. Just hurry back before your dome is destroyed!</desc>
+    <releasedate>20220927T000000</releasedate>
+    <developer>Bippinbits</developer>
+    <publisher>Raw Fury</publisher>
+    <genre>Action</genre>
+    <image>./domekeeper/cover.png</image>
+  </game>
+</gameList>

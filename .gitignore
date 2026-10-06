@@ -1,0 +1,16 @@
+# Built by build/build.sh (encoder) and build/build_godot_profiling.sh
+port/domekeeper/tools/godot_adpcm.*
+build/src/
+build/out/
+# Game files and files the first run creates are never part of the repo
+port/domekeeper/*.pck
+port/domekeeper/cache/
+port/domekeeper/conf/
+port/domekeeper/godot/
+port/domekeeper/override.cfg
+port/domekeeper/log.txt
+port/domekeeper/setup_log.txt
+# Test output and packages
+tests/out/
+*.zip
+__pycache__/

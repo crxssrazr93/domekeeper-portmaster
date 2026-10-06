@@ -1,0 +1,21 @@
+#!/bin/bash
+# First run setup, run by PortMaster's patcher (utils/patcher.txt), which shows each line this
+# script prints. The launcher exports GAMEDIR, godot_dir, godot_executable and DEVICE_ARCH.
+# Godot's full output goes to setup_log.txt; only the setup's own progress lines are shown
+# (the setup prints them with printerr, which Godot flushes at once, unlike print).
+cd "$GAMEDIR" || exit 1
+chmod +x "tools/godot_adpcm.$DEVICE_ARCH"
+echo "Adapting your copy of Dome Keeper to this device."
+echo "This runs once (and again after a game update)."
+"$godot_dir/$godot_executable" --headless --main-pack domekeeper.pck \
+  --script res://setup/port_setup.gd -- --out="$GAMEDIR" --encoder="$GAMEDIR/tools/godot_adpcm.$DEVICE_ARCH" 2>&1 \
+  | tee setup_log.txt | while IFS= read -r line; do
+    case "$line" in PORT_SETUP:*) echo "${line#PORT_SETUP: }" ;; esac
+  done
+# Success is the marker file the setup writes after its last step (its exit code is not usable)
+if [ -f cache/.setup_ok ]; then
+  stat -c '%s %Y' domekeeper.pck > cache/.setup_stamp
+  echo "Done. Starting the game."
+else
+  echo "Setup failed. See ports/domekeeper/setup_log.txt."
+fi
