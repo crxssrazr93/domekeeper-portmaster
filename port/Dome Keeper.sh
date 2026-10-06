@@ -93,7 +93,10 @@ texture_factor="$(awk -v w="${DISPLAY_WIDTH:-640}" -v h="${DISPLAY_HEIGHT:-480}"
 # with PortMaster's astcenc; elsewhere it is scaled like the rest.
 texture_astc=""
 [ "$DEVICE_ARCH" = "aarch64" ] && [ -x "$controlfolder/astcenc.aarch64" ] && texture_astc="$controlfolder/astcenc.aarch64"
-texture_mode="$texture_factor ${texture_astc:+astc}"
+# The setup version is part of the stamp, so installs prepared by an older setup run the new steps
+# (2: map render targets saved at 2x2)
+setup_version=2
+texture_mode="$texture_factor ${texture_astc:+astc} setup$setup_version"
 pck_stamp="$(file_stamp domekeeper.pck) $texture_mode"
 port_files domekeeper.pck override.cfg
 if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_stamp" ]; then

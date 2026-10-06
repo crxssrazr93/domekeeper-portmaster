@@ -56,12 +56,14 @@ Starting a run crashed on the test device too. On Mali's vendor driver the GPU m
 | Round 2 | 482 MB, crashed | 921 MB | |
 | + texture factor 3 at 640x480 | about 280 MB | 766 MB | about 450 MB |
 | + ASTC for colour art, map layers at half resolution | 248 MB | 755 MB | 441 MB (a few seconds, while the level builds) |
+| + map render targets saved at 2x2 | 247 MB | | 394 MB (intro 187 to 97 MB) |
 
 Godot's own texture counter on the PC: lobby peak 319 MB to 164 MB, level 167 MB to 101 MB.
 
 * **Texture factor.** Textures of 512 px or more are now divided by the ratio between the 1920x1080 design and the screen (3 at 640x480, at least 2, at most 4), instead of always by 2. The launcher passes it to the setup and it is part of the setup stamp, so a different screen size redoes the textures from the original `.ctex` files, which stay in the pack.
 * **ASTC.** Colour art (more than 64 colours, no mipmaps) is halved and compressed to ASTC 4x4 with PortMaster's `astcenc.aarch64` (in the PortMaster folder on every aarch64 firmware), 1 byte per pixel instead of 4. The Mali G31 decodes it in hardware. Palette index art cannot be compressed: its colour values are palette coordinates, and any lossy change reads a different colour. 72 of the 424 scaled textures qualify.
 * **Map layers at half resolution.** `ViewportRocks`, `ViewportLights`, `ViewportBackgroundAlpha` and `ViewportCrackImpact` are map sized render targets. PortTweaks halves each one in `frame_pre_draw`, before its first draw, scales its canvas transform by 0.5 and doubles the sprites that show it. `Map.gd` places background alpha sprites at `size.x / 2`, so that viewport's canvas origin and the sprites already placed are shifted to match. `Map.gd` itself is compiled GDScript (`.gdc`) and is not changed.
+* **Render targets saved large.** `Map.tscn` saves `ViewportRocks`, `ViewportLights` and `ViewportBackgroundAlpha` at 2048x2048, and `BundleResourceTracker.tscn` its viewport at 2000x2000. Godot allocates a render target as soon as a scene is instantiated, before the game's code sets the real size, so every map (the intro's shader preload map, the lobby, the level) briefly held about 64 MB of render targets, and Godot's texture counter jumped to 300 MB on entering the lobby. The setup patches the saved size to 2x2 directly in the exported binary scenes (a `Vector2i` is its variant tag 45 and two int32, and 2048x2048 is stored once). Re-saving the scenes through Godot is not possible in the setup: their scripts need the game's autoloads to compile. The launcher's setup stamp carries a setup version, so installs prepared before this run the new step.
 * **Render targets on Mali.** A render target costs about 4.5 times its RGBA size in GPU memory on the vendor driver (r20p0), and `disable_3d` saves only about 1 MB each. Halving a target that has already been drawn gives back much less than its size, since freed GPU memory is not returned promptly.
 * **Korean, Japanese, Chinese.** With these changes Korean reaches a run on the device: the lobby takes about 6 s longer to load (the real font data is loaded and its glyphs are rendered) and needs about 40 MB more.
 
@@ -188,6 +190,6 @@ An existing unofficial handheld build ("Extreme Compress Mod", the stock `godot4
 
 * Memory and frame rate in long runs and on medium to huge maps.
 * Other devices: rk3326 and rk3566 handhelds (ArkOS, ROCKNIX with Panfrost, muOS).
-* The lobby still peaks at about 440 MB of GPU memory for a few seconds while the level builds in the background. `ViewportTopEffects` is still full size.
+* The lobby holds about 394 MB of GPU memory for 127 MB of textures counted by Godot; its render targets account for only about 34 MB of that. `ViewportTopEffects` is still full size.
 * Local splitscreen.
 * Confirm on ROCKNIX with Panfrost.

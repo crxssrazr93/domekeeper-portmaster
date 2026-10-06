@@ -89,7 +89,7 @@ func _initialize() -> void:
 	if err != OK:
 		push_error("cannot open domekeeper.pck for patching: %s" % error_string(err))
 		return
-	var ok := copy_project_data() and write_class_cache() and write_override() and convert_samples() and lazy_music() and lazy_fonts() and defer_panel_text() and scale_textures()
+	var ok := copy_project_data() and write_class_cache() and write_override() and convert_samples() and lazy_music() and lazy_fonts() and defer_panel_text() and small_viewports() and scale_textures()
 	pck.close()
 	if ok:
 		DirAccess.make_dir_recursive_absolute(out_dir.path_join("cache"))
@@ -305,6 +305,59 @@ func defer_panel_text() -> bool:
 		var new_text: String = imp[0].replace('path="%s"' % imported, 'path="res://%s/%s"' % [cache, name])
 		pck.replace(remap_path, new_text.to_utf8_buffer())
 		printerr("PORT_SETUP: %s labels deferred=%d" % [scene_path.get_file(), moved])
+	return true
+
+## Map sized render targets saved at a large size. Godot allocates a SubViewport's render target
+## as soon as the scene is instantiated, before the game's code sets the real (map) size, and the
+## Mali vendor driver does not hand that memory back: entering the lobby took GPU memory from
+## about 250 to 450 MB. The saved size is patched to 2x2 in the exported binary scene (Map.gd and
+## BundleResourceTracker.gd set the real sizes). In binary resources a Vector2i is its variant tag
+## (45) and two int32; Map.scn stores 2048x2048 once, shared by its three map layers. The scenes
+## are not re-saved through Godot because their scripts do not compile without the game's
+## autoloads, which the setup does not have.
+const VARIANT_VECTOR2I := 45
+const SMALL_VIEWPORTS := {
+	"res://content/map/Map.tscn": Vector2i(2048, 2048),
+	"res://content/keeper/keeper2/BundleResourceTracker.tscn": Vector2i(2000, 2000),
+}
+
+func vector2i_bytes(v: Vector2i) -> PackedByteArray:
+	var b := PackedByteArray()
+	b.resize(12)
+	b.encode_u32(0, VARIANT_VECTOR2I)
+	b.encode_s32(4, v.x)
+	b.encode_s32(8, v.y)
+	return b
+
+func find_bytes(data: PackedByteArray, pattern: PackedByteArray) -> Array:
+	var hits := []
+	var first := pattern[0]
+	var i := data.find(first)
+	while i >= 0 and i + pattern.size() <= data.size():
+		if data.slice(i, i + pattern.size()) == pattern:
+			hits.append(i)
+		i = data.find(first, i + 1)
+	return hits
+
+func small_viewports() -> bool:
+	var small := vector2i_bytes(Vector2i(2, 2))
+	for scene_path in SMALL_VIEWPORTS:
+		var scn: String = read_import(scene_path + ".remap")[1]
+		if not pck.entries.has(scn):
+			push_error("no exported scene for " + scene_path)
+			return false
+		var data := pck.read(scn)
+		var hits := find_bytes(data, vector2i_bytes(SMALL_VIEWPORTS[scene_path]))
+		if hits.is_empty() and not find_bytes(data, small).is_empty():
+			continue  # patched before
+		if hits.size() != 1:
+			# a game update changed the scene; leave it
+			printerr("PORT_SETUP: %s render target size %s found %d times, left as is" % [scene_path.get_file(), SMALL_VIEWPORTS[scene_path], hits.size()])
+			continue
+		for i in small.size():
+			data[hits[0] + i] = small[i]
+		pck.replace(scn, data)
+		printerr("PORT_SETUP: %s render targets saved at 2x2" % scene_path.get_file())
 	return true
 
 ## True when a sample of the opaque pixels has few distinct colours (palette index sprites).
