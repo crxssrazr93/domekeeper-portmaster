@@ -66,10 +66,17 @@ fi
 $ESUDO mount "$controlfolder/libs/${godot_runtime}.squashfs" "$godot_dir"
 $ESUDO mount "$controlfolder/libs/${weston_runtime}.squashfs" "$weston_dir"
 
+# Size and modification time of each file, as "stat -c '%s %Y'" prints them (muOS has no stat)
+file_stamp() {
+  if command -v stat >/dev/null; then stat -c '%s %Y' "$@" 2>/dev/null; return 0; fi
+  local f
+  for f in "$@"; do [ -e "$f" ] && echo "$(ls -lnL "$f" | awk '{print $5}') $(date -r "$f" +%s)"; done
+  return 0
+}
 # First run (and again after the game updates its pck): adapt the user's pck to the stock
 # Godot 4.3 runtime and to 1 GB devices. setup/port_setup.gd explains every step; each one
 # skips work already done, so an interrupted run just continues next time.
-pck_stamp="$(stat -c '%s %Y' domekeeper.pck)"
+pck_stamp="$(file_stamp domekeeper.pck)"
 if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_stamp" ]; then
   export GAMEDIR godot_dir godot_executable DEVICE_ARCH
   chmod +x "$GAMEDIR/tools/patchscript"
@@ -86,7 +93,7 @@ if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_s
     exit 1
   fi
   # tools/patchscript writes the stamp only on success, from the pck as the setup left it
-  if [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$(stat -c '%s %Y' domekeeper.pck)" ]; then
+  if [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$(file_stamp domekeeper.pck)" ]; then
     pm_message "Preparing the game failed, see ports/domekeeper/setup_log.txt."
     sleep 8
     $ESUDO umount "$godot_dir" "$weston_dir" 2>/dev/null
@@ -159,6 +166,11 @@ fi
 pm_platform_helper "$godot_dir/$godot_executable"
 export SDL_GAMECONTROLLERCONFIG="$godot_mapping"
 
+# Device and memory at start and exit, for reports from devices that run out of memory
+mem_report() { echo "PORT_MEM ($1): $(awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/ { printf "%s %d MB  ", $1, $2 / 1024 }' /proc/meminfo)"; }
+echo "PORT_DEVICE: ${CFW_NAME} ${CFW_VERSION} ${DEVICE_NAME} ${DEVICE_CPU} ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}"
+mem_report start
+
 # westonwrap replaces XDG_RUNTIME_DIR; pass the real one on so ALSA can reach PipeWire for sound.
 REAL_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # DK_UI_SCALE overrides the automatic UI scale (1.33 at 640x480 and 720x720, 1.19 at 480x320, 1.0 on 16:9 screens).
@@ -167,6 +179,7 @@ $ESUDO env $weston_dir/westonwrap.sh headless noop kiosk crusty_x11egl \
   "$godot_dir/$godot_executable" --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" -f \
   --rendering-driver opengl3_es --audio-driver ALSA --main-pack "$GAMEDIR/domekeeper.pck"
 
+mem_report exit
 $ESUDO $weston_dir/westonwrap.sh cleanup
 if [[ "$PM_CAN_MOUNT" != "N" ]]; then
   $ESUDO umount "$godot_dir"
