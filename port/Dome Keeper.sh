@@ -118,6 +118,11 @@ if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_s
   fi
 fi
 
+# Godot only flushes print() output at exit in release builds, so the FPS lines (--print-fps)
+# would be lost when the firmware closes the game; flush every line instead.
+grep -q "^run/flush_stdout_on_print" override.cfg 2>/dev/null ||
+  printf '\n[application]\n\nrun/flush_stdout_on_print=true\n' >> override.cfg
+
 # Defaults for a fresh profile: answer the online services prompt (multiplayer servers are not
 # available on this port), turn off crash reports, cap the frame rate and prefer the gamepad.
 options_dir="$CONFDIR/godot/app_userdata/Dome Keeper"
