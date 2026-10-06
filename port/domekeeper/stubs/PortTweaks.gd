@@ -1,6 +1,7 @@
 extends Node
 ## PortMaster tweaks for small handheld screens and 1 GB devices. Added as an autoload by
-## setup/port_setup.gd. Environment overrides: DK_UI_SCALE (number, 0 = automatic).
+## setup/port_setup.gd. Environment overrides: DK_UI_SCALE and DK_WORLD_ZOOM (numbers, 0 =
+## automatic).
 
 ## The title screen keeps hidden patch notes and credits panels whose labels hold the full
 ## changelog and credits. Hidden, the panels are ~0 px wide, so every character wraps onto its
@@ -312,7 +313,43 @@ func _apply_ui_scale() -> void:
 	if not is_equal_approx(win.content_scale_factor, s):
 		win.content_scale_factor = s
 
+## The world (lobby, mine, dome) and each player's HUD are drawn in the SubViewports of
+## systems/camera/ViewportContainer.gd, whose size_2d_override holds the 1920x1080 design view;
+## at 640x480 a world pixel at the game's camera zoom of 4 covers 1.33 screen pixels and the
+## lobby's in world text is hard to read. After the game sizes them, divide the override (as the
+## game itself does for split screen) so the design is drawn at least at half its size, by at
+## most MAX_WORLD_ZOOM: 1.5 at 640x480 and 1.33 at 720x720 (2 screen pixels per world pixel),
+## 1.0 on 16:9 screens. The render target size stays the same; less of the world is in view.
+## DK_WORLD_ZOOM overrides the factor (1 = the game's view).
+const VIEWPORT_CONTAINER := "res://systems/camera/ViewportContainer.gd"
+const MAX_WORLD_ZOOM := 1.5
+
+func _zoom_world(container: Node) -> void:
+	var world: SubViewport = container.get("_worldSubviewport")
+	var ui: SubViewport = container.get("_uiSubviewport")
+	if not world or world.size_2d_override.x <= 0 or world.size_2d_override.y <= 0:
+		return
+	# the signal is also emitted when only the camera zoom changed: zoom only an override the
+	# game has just set, not the one zoomed here before
+	if world.size_2d_override == world.get_meta("port_zoomed", Vector2i.ZERO):
+		return
+	var shown := Vector2(world.size) / Vector2(world.size_2d_override)
+	var f := clampf(TARGET_TEXT_SCALE / minf(shown.x, shown.y), 1.0, MAX_WORLD_ZOOM)
+	var env := OS.get_environment("DK_WORLD_ZOOM")
+	if env.is_valid_float() and env.to_float() > 0.0:
+		f = env.to_float()
+	if is_equal_approx(f, 1.0):
+		return
+	world.size_2d_override = Vector2i((Vector2(world.size_2d_override) / f).round())
+	world.set_meta("port_zoomed", world.size_2d_override)
+	if ui:
+		ui.size_2d_override = Vector2i((Vector2(ui.size_2d_override) / f).round())
+
 func _on_node_added(node: Node) -> void:
+	var script: Script = node.get_script()
+	if script and script.resource_path == VIEWPORT_CONTAINER and node.has_signal("logic_size_changed"):
+		# connected before the game's own listeners, so they see the zoomed size
+		node.logic_size_changed.connect(_zoom_world.bind(node))
 	if node.name == BUNDLE_TRACKER:
 		_bundle_trackers.append(node)
 	elif node is SubViewport and node.get_parent() and node.get_parent().name == BUNDLE_TRACKER:

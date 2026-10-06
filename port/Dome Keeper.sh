@@ -192,12 +192,14 @@ pm_platform_helper "$godot_dir/$godot_executable"
 export SDL_GAMECONTROLLERCONFIG="$godot_mapping"
 port_log "controller mapping for the game: $(printf '%s\n' "$SDL_GAMECONTROLLERCONFIG" | head -n 1)"
 
-port_log "starting the game, UI scale ${DK_UI_SCALE:-automatic}"
+port_log "starting the game, UI scale ${DK_UI_SCALE:-automatic}, world zoom ${DK_WORLD_ZOOM:-automatic}"
 # westonwrap replaces XDG_RUNTIME_DIR; pass the real one on so ALSA can reach PipeWire for sound.
 REAL_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # DK_UI_SCALE overrides the automatic UI scale (1.33 at 640x480 and 720x720, 1.19 at 480x320, 1.0 on 16:9 screens).
+# DK_WORLD_ZOOM overrides the automatic zoom of the lobby and the mine (1.5 at 640x480, 1.33 at 720x720, 1.0 on
+# 16:9 screens; 1 = the game's own view, which shows more of the world at a smaller size).
 $ESUDO env $weston_dir/westonwrap.sh headless noop kiosk crusty_x11egl \
-  LD_PRELOAD= XDG_DATA_HOME="$CONFDIR" XDG_RUNTIME_DIR="$REAL_XDG_RUNTIME_DIR" DK_UI_SCALE="${DK_UI_SCALE:-0}" \
+  LD_PRELOAD= XDG_DATA_HOME="$CONFDIR" XDG_RUNTIME_DIR="$REAL_XDG_RUNTIME_DIR" DK_UI_SCALE="${DK_UI_SCALE:-0}" DK_WORLD_ZOOM="${DK_WORLD_ZOOM:-0}" \
   "$godot_dir/$godot_executable" --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" -f \
   --rendering-driver opengl3_es --audio-driver ALSA --print-fps --main-pack "$GAMEDIR/domekeeper.pck"
 

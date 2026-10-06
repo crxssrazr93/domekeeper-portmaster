@@ -99,6 +99,10 @@ which aims for half size text, but never shows fewer than 1280x1080 design units
 
 16:9 screens are already limited by height, so they cannot be scaled up without clipping that panel. `DK_UI_SCALE` in the launcher overrides the result. Checked at all six sizes: title, options, new game popup, run and pause menu (`tests/resolutions.sh`).
 
+### World zoom
+
+The UI scale does not reach the lobby (its game mode, loadout and keeper panels are drawn in the world) or the mine. The world and each player's HUD are drawn in the SubViewports of `systems/camera/ViewportContainer.gd`, whose `size_2d_override` holds the 1920x1080 design view; at 640x480 a world pixel at the game's camera zoom of 4 covers 1.33 screen pixels, and the lobby text is a few pixels tall. The game already enlarges this view for split screen by dividing that override by 1.75. PortTweaks does the same after each resize (on `logic_size_changed`, ignoring the emits for camera zoom changes) with a factor that draws the design at least at half size, at most 1.5: 2 screen pixels per world pixel at 640x480 (1.5) and 720x720 (1.33), 1.0 on 16:9 screens. The render target sizes are unchanged, so GPU memory is the same; less of the world is in view. The lobby camera follows the keeper, so its panels come into view as the keeper moves toward them, as they already did at 4:3 without the zoom. Checked in the lobby (640x480, 720x720) and in a run on the device. `DK_WORLD_ZOOM` overrides the factor (1 = the game's view).
+
 The intro's two gradient backgrounds are turned 270 degrees and sized for 16:9. On 4:3 screens they end about 85 design units short of the top, and the map the intro draws underneath (layer -10, to compile the map shaders early) showed through as a blue strip above the bippinbits logo. PortTweaks lengthens them to reach the top edge.
 
 ## 5. How the problems were found
