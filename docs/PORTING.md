@@ -171,9 +171,8 @@ H700 SoC (4 x Cortex A53), a single core Mali G31 (`/sys/class/misc/mali0/device
 
 ### Launcher
 
-* **Controller numbering.** Godot numbers joypad buttons from `BTN_JOYSTICK` (0x120) upwards, then `BTN_MISC`, and ignores lower key codes. SDL numbers every key code in ascending order. The H700 pad also reports Esc and the volume keys (codes 1, 114, 115), so every `bN` in PortMaster's SDL mapping was 3 too high for Godot (L1 acted as accept). `godot_joy_mapping` reads the pad's key bitmap from `/sys/class/input/eventN/device/capabilities/key` and renumbers the mapping; pads without low key codes get it unchanged. It is exported only after gptokeyb has started, because gptokeyb is an SDL program and needs the original. It cannot be passed as a `VAR=value` argument to `westonwrap.sh`, which joins its arguments and evals them, so the space in the pad's name breaks it.
+* **Controller.** The game sees one virtual Xbox 360 pad made by `gptokeyb2 -x`, which reads the real pad through SDL with PortMaster's mapping for the device, so the buttons are the same on every firmware and the game uses Godot's built in Xbox 360 mapping. gptokeyb2 also handles the exit hotkey. Godot 4.3 opens every `/dev/input/event*` joystick itself (Westonpack's `CRUSTY_BLOCK_INPUT` only hides pads from SDL), so the launcher gives each pad present before gptokeyb2 starts a mapping (by its GUID, from `/sys/class/input/eventN/device/id`) that binds nothing the game uses. Godot drops buttons and axes a mapping does not bind, but maps a pad's hat to the D-pad unless the mapping binds it, so the hat is bound to `misc1` and `paddle1` to `paddle3`, which the game ignores.
 * **Sound** needs the real `XDG_RUNTIME_DIR`: Westonpack replaces it, and ALSA then cannot reach PipeWire. The launcher passes the original on.
-* **gptokeyb**: version 1 everywhere except muOS (gptokeyb2, as in other ports), since the `.gptk` file uses version 1 syntax.
 
 ### Frame rate: the map shaders
 
@@ -204,11 +203,12 @@ An existing unofficial handheld build ("Extreme Compress Mod", the stock `godot4
 
 ### What failed on the device and why
 
-1. `gptokeyb2 -x` (a virtual Xbox pad as a mapping workaround) did not create a device as invoked; the renumbered mapping made it unnecessary.
+1. Earlier versions renumbered PortMaster's SDL mapping for Godot instead of using a virtual pad. Godot numbers joypad buttons from `BTN_JOYSTICK` upwards, then `BTN_MISC`, and skips lower key codes, while the firmware's SDL numbers every key code in ascending order; the H700 pad also reports Esc and the volume keys, so every `bN` was 3 too high (L1 acted as accept). The renumbering worked but depended on each firmware's SDL and on the mapping's name matching the pad, which failed on muOS. An early `gptokeyb2 -x` attempt created no device as invoked; with gptokeyb2 started in the background before the game, it works.
 2. Godot's `--print-fps` printed nothing at first: release builds do not flush stdout on print. The launcher now adds `application/run/flush_stdout_on_print=true` to `override.cfg`, and the frame rate appears in `log.txt`.
 3. Fixed waits before menu presses failed whenever loading took longer; the device scripts wait for the perf log to show the expected scene.
 4. The launcher first compared the setup stamp with the pck's size and date from before the setup, which the setup changes by patching the pck in place: every fresh setup was reported as failed. A rerun on the device passed only because nothing changed; `tests/launchertest.sh` with `FRESH=1` caught it.
 5. On the test PC, `/tmp` is a 20 GB tmpfs: copies of the pck there filled it and truncated files, which showed up as a corrupt pck. Scratch copies now go to disk.
+6. With the virtual pad, `CRUSTY_BLOCK_INPUT=1` did not hide the real pad from Godot, and every press arrived twice. An empty mapping for the real pad still moved menus two steps per D-pad press, because Godot maps an unbound hat to the D-pad; binding the hat to unused buttons fixed it.
 
 ## 8. Still to do
 

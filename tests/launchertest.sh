@@ -21,7 +21,7 @@ else
 fi
 touch "$ROOT/PortMaster/libs/weston_pkg_0.2.squashfs" "$ROOT/PortMaster/libs/godot_4.3.squashfs"
 cat > "$ROOT/PortMaster/control.txt" <<EOC
-directory="${ROOT#/}"; ESUDO=""; GPTOKEYB="true"; CFW_NAME="mock"; PM_CAN_MOUNT="Y"; DEVICE_ARCH="x86_64"
+directory="${ROOT#/}"; ESUDO=""; GPTOKEYB="true"; GPTOKEYB2="true"; CFW_NAME="mock"; PM_CAN_MOUNT="Y"; DEVICE_ARCH="x86_64"
 DISPLAY_WIDTH=${RES_W:-640}; DISPLAY_HEIGHT=${RES_H:-480}
 get_controls() { :; }; pm_message() { echo "PM_MESSAGE: \$*"; }; pm_finish() { echo PM_FINISH; }; pm_platform_helper() { :; }
 EOC
