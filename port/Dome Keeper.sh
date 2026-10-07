@@ -1,4 +1,5 @@
 #!/bin/bash
+# PORTMASTER: domekeeper.zip, Dome Keeper.sh
 
 XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 
@@ -135,25 +136,101 @@ if [ ! -f "$options_dir/options.txt" ]; then
   echo '{"onlineMultiplayerDecided":true,"allowOnlineMultiplayer":false,"allowCrashReports":false,"fullscreen":true,"vsync":true,"targetfps":60,"singleplayerUseGamepad":true}' > "$options_dir/options.txt"
 fi
 
-# The game gets one virtual Xbox 360 pad from gptokeyb2, which reads the real pad with PortMaster's
-# mapping for the device, so the buttons are the same on every firmware. gptokeyb2 also supplies
-# the exit hotkey. Godot opens every joystick itself (CRUSTY_BLOCK_INPUT only hides pads from SDL),
-# so the pads present before the virtual one is made get a mapping that binds nothing the game uses:
-# Godot drops unbound buttons and axes, and its D-pad hat (which Godot maps to the D-pad unless the
-# mapping binds it) goes to the unused misc1 and paddle buttons. The virtual pad uses Godot's
-# built-in Xbox 360 mapping.
-ignored_pads=""
-for ev in /sys/class/input/event*/device; do
-  ls -d "$ev"/js* >/dev/null 2>&1 || continue
-  guid=""
-  for f in bustype vendor product version; do
-    v=$((16#$(cat "$ev/id/$f"))); guid+=$(printf '%02x%02x0000' $((v & 255)) $((v >> 8)))
+# The input device a mapping line is for. By its SDL GUID first (bus, vendor, product and version,
+# little endian; current SDL keeps a CRC of the name in bytes 2 and 3, so those are skipped): the
+# mapping's name need not be the device's (muOS maps its "muOS-Keys" pad as "Deeplay-keys"). Only
+# joysticks count, since key devices such as gpio-keys can report the same ids. Then by name, then
+# the only joystick with buttons.
+mapping_pad() {
+  local guid="${1%%,*}" name="${1#*,}" ev id pads=()
+  name="${name%%,*}"
+  le16() { local v=$((16#$(cat "$1" 2>/dev/null || echo 0))); printf '%02x%02x' $((v & 255)) $((v >> 8 & 255)); }
+  for ev in /sys/class/input/event*/device; do
+    [ -d "$ev/id" ] && ls -d "$ev"/js* >/dev/null 2>&1 || continue
+    id="$(le16 "$ev/id/bustype")0000$(le16 "$ev/id/vendor")0000$(le16 "$ev/id/product")0000$(le16 "$ev/id/version")0000"
+    [ "${id:0:4}${id:8}" = "${guid:0:4}${guid:8}" ] && { echo "$ev"; return; }
   done
-  ignored_pads+="$guid,Ignored,misc1:h0.1,paddle1:h0.2,paddle2:h0.4,paddle3:h0.8,platform:Linux,"$'\n'
-done
-$GPTOKEYB2 "$godot_executable" -x &
-export SDL_GAMECONTROLLERCONFIG="$ignored_pads"
+  for ev in /sys/class/input/event*/device; do
+    [ "$(cat "$ev/name" 2>/dev/null)" = "$name" ] && { echo "$ev"; return; }
+  done
+  for ev in /sys/class/input/event*/device; do
+    ls -d "$ev"/js* >/dev/null 2>&1 || continue
+    [ -n "$(cat "$ev/capabilities/key" 2>/dev/null)" ] && pads+=("$ev")
+  done
+  [ ${#pads[@]} -eq 1 ] && echo "${pads[0]}"
+}
+# Godot numbers joypad buttons from BTN_JOYSTICK (0x120) upwards, then BTN_MISC to BTN_JOYSTICK,
+# and skips lower key codes. SDL numbers every key code in ascending order, so on pads that also
+# report keys like volume or Esc the SDL mapping's bN indices point at the wrong buttons in Godot.
+# Renumber them using the pad's key bitmap.
+godot_joy_mapping() {
+  local mapping="$1" name="${1#*,}" dev="" ev wbits=64 n i b w code
+  name="${name%%,*}"
+  dev="$(mapping_pad "$mapping")"
+  [ -n "$dev" ] || { echo "$mapping"; return; }
+  case "$(uname -m)" in aarch64|x86_64) ;; *) wbits=32 ;; esac
+  local words=($(cat "$dev/capabilities/key")) codes=()
+  n=${#words[@]}
+  for ((i = 0; i < n; i++)); do
+    w=$((16#${words[n-1-i]}))
+    for ((b = 0; b < wbits; b++)); do
+      (( (w >> b) & 1 )) && codes+=($((i * wbits + b)))
+    done
+  done
+  local -A godot_idx=()
+  local g=0 sdl=0 out="" f
+  for code in "${codes[@]}"; do (( code >= 0x120 )) && godot_idx[$code]=$((g++)); done
+  for code in "${codes[@]}"; do (( code >= 0x100 && code < 0x120 )) && godot_idx[$code]=$((g++)); done
+  local -A sdl_to_godot=()
+  for code in "${codes[@]}"; do
+    [ -n "${godot_idx[$code]}" ] && sdl_to_godot[$sdl]=${godot_idx[$code]}
+    sdl=$((sdl + 1))
+  done
+  IFS=, read -ra fields <<< "$mapping"
+  for f in "${fields[@]}"; do
+    if [[ "$f" =~ ^([^:]+):b([0-9]+)$ ]]; then
+      [ -n "${sdl_to_godot[${BASH_REMATCH[2]}]}" ] || continue
+      f="${BASH_REMATCH[1]}:b${sdl_to_godot[${BASH_REMATCH[2]}]}"
+    fi
+    out+="$f,"
+  done
+  echo "$out"
+}
+
+# The game reads the pads itself (Godot joypad input), each pad as its own player, so local split
+# screen works. The built in pad gets PortMaster's mapping for the device, renumbered for Godot;
+# other pads use Godot's own controller database. The mapping goes to the game as a westonwrap
+# VAR=value argument: westonwrap sources PortMaster's control.txt again, which on some firmwares
+# (muOS) exports the original mapping over anything exported here. westonwrap evals its arguments,
+# so the mapping is one line and the spaces in its name (only the GUID is matched) become dots.
+godot_mapping=""
+pad_dev=""
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  godot_mapping="$(godot_joy_mapping "$line")"
+  pad_dev="$(mapping_pad "$line")"
+  break
+done <<< "$SDL_GAMECONTROLLERCONFIG"
+godot_mapping="$(printf '%s' "$godot_mapping" | tr ' ' '.')"
+# Godot 4.3 only opens a joystick with both ABS_X and ABS_Y, or ABS_RX and ABS_RY. Some built in
+# pads report their sticks on other axes (muOS on the RG34XX-SP: ABS_Y, ABS_Z, ABS_RY, ABS_RZ), and
+# Godot would not see them at all. Those get a virtual Xbox 360 pad from gptokeyb2, which reads
+# the pad with PortMaster's mapping; it also supplies the exit hotkey. In case Godot does open the
+# built in pad after all, its mapping then binds nothing the game uses (Godot drops unbound buttons
+# and axes, and maps an unbound hat to the D-pad, so the hat goes to unused buttons).
+pad_abs=$((16#$(awk '{print $NF}' "$pad_dev/capabilities/abs" 2>/dev/null || echo 0)))
+if [ -n "$pad_dev" ] && ! (( (pad_abs & 3) == 3 || (pad_abs & 24) == 24 )) && [ -n "$GPTOKEYB2" ]; then
+  port_log "controller: the built in pad has no axes Godot accepts (abs $(cat "$pad_dev/capabilities/abs")), using a virtual pad"
+  $GPTOKEYB2 "$godot_executable" -x &
+  godot_mapping="${godot_mapping%%,*},Ignored,misc1:h0.1,paddle1:h0.2,paddle2:h0.4,paddle3:h0.8,platform:Linux,"
+# gptokeyb1 is unresponsive on muOS, where gptokeyb2 is used instead (as in the Dicey Dungeons port)
+elif [ "$CFW_NAME" = "muOS" ] && [ -n "$GPTOKEYB2" ]; then
+  $GPTOKEYB2 "$godot_executable" -c "$GAMEDIR/domekeeper.gptk" &
+else
+  $GPTOKEYB "$godot_executable" -c "$GAMEDIR/domekeeper.gptk" &
+fi
 pm_platform_helper "$godot_dir/$godot_executable"
+port_log "controller mapping for the game: ${godot_mapping:-none (Godot database)}"
 
 port_log "starting the game, UI scale ${DK_UI_SCALE:-automatic}, world zoom ${DK_WORLD_ZOOM:-automatic}, lobby zoom ${DK_LOBBY_ZOOM:-automatic}"
 # westonwrap replaces XDG_RUNTIME_DIR; pass the real one on so ALSA can reach PipeWire for sound.
@@ -163,7 +240,7 @@ REAL_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # 1 = the game's own view, which shows more of the world at a smaller size). DK_LOBBY_ZOOM does the same for the
 # lobby (1.75 at 640x480, 1.56 at 720x720, 1.0 on 16:9 screens).
 $ESUDO env $weston_dir/westonwrap.sh headless noop kiosk crusty_x11egl \
-  LD_PRELOAD= XDG_DATA_HOME="$CONFDIR" XDG_RUNTIME_DIR="$REAL_XDG_RUNTIME_DIR" DK_UI_SCALE="${DK_UI_SCALE:-0}" DK_WORLD_ZOOM="${DK_WORLD_ZOOM:-0}" DK_LOBBY_ZOOM="${DK_LOBBY_ZOOM:-0}" \
+  LD_PRELOAD= ${godot_mapping:+SDL_GAMECONTROLLERCONFIG="$godot_mapping"} XDG_DATA_HOME="$CONFDIR" XDG_RUNTIME_DIR="$REAL_XDG_RUNTIME_DIR" DK_UI_SCALE="${DK_UI_SCALE:-0}" DK_WORLD_ZOOM="${DK_WORLD_ZOOM:-0}" DK_LOBBY_ZOOM="${DK_LOBBY_ZOOM:-0}" \
   "$godot_dir/$godot_executable" --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" -f \
   --rendering-driver opengl3_es --audio-driver ALSA --print-fps --main-pack "$GAMEDIR/domekeeper.pck"
 
