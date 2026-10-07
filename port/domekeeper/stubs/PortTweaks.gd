@@ -319,10 +319,15 @@ func _apply_ui_scale() -> void:
 ## lobby's in world text is hard to read. After the game sizes them, divide the override (as the
 ## game itself does for split screen) so the design is drawn at least at half its size, by at
 ## most MAX_WORLD_ZOOM: 1.5 at 640x480 and 1.33 at 720x720 (2 screen pixels per world pixel),
-## 1.0 on 16:9 screens. The render target size stays the same; less of the world is in view.
-## DK_WORLD_ZOOM overrides the factor (1 = the game's view).
+## 1.0 on 16:9 screens. The lobby (the loadout stage) is zoomed further, to 7/3 screen pixels per
+## world pixel (1.75 at 640x480, 1.56 at 720x720, chosen on the device): its game mode, loadout
+## and keeper panels are text drawn in the world. The render target size stays the same; less of the world is in view.
+## DK_WORLD_ZOOM and DK_LOBBY_ZOOM override the factors (1 = the game's view).
 const VIEWPORT_CONTAINER := "res://systems/camera/ViewportContainer.gd"
 const MAX_WORLD_ZOOM := 1.5
+const LOBBY_TEXT_SCALE := 7.0 / 12.0
+const MAX_LOBBY_ZOOM := 1.75
+const LOBBY_SCRIPT := "res://stages/loadout/MultiplayerloadoutStage.gd"
 
 func _zoom_world(container: Node) -> void:
 	var world: SubViewport = container.get("_worldSubviewport")
@@ -334,8 +339,10 @@ func _zoom_world(container: Node) -> void:
 	if world.size_2d_override == world.get_meta("port_zoomed", Vector2i.ZERO):
 		return
 	var shown := Vector2(world.size) / Vector2(world.size_2d_override)
-	var f := clampf(TARGET_TEXT_SCALE / minf(shown.x, shown.y), 1.0, MAX_WORLD_ZOOM)
-	var env := OS.get_environment("DK_WORLD_ZOOM")
+	var lobby := _in_lobby(container)
+	var f := clampf((LOBBY_TEXT_SCALE if lobby else TARGET_TEXT_SCALE) / minf(shown.x, shown.y), 1.0,
+			MAX_LOBBY_ZOOM if lobby else MAX_WORLD_ZOOM)
+	var env := OS.get_environment("DK_LOBBY_ZOOM" if lobby else "DK_WORLD_ZOOM")
 	if env.is_valid_float() and env.to_float() > 0.0:
 		f = env.to_float()
 	if is_equal_approx(f, 1.0):
@@ -345,7 +352,97 @@ func _zoom_world(container: Node) -> void:
 	if ui:
 		ui.size_2d_override = Vector2i((Vector2(ui.size_2d_override) / f).round())
 
+func _in_lobby(node: Node) -> bool:
+	while node:
+		var sc: Script = node.get_script()
+		if sc and sc.resource_path == LOBBY_SCRIPT:
+			return true
+		node = node.get_parent()
+	return false
+
+## The title's menus (New Game, Options, Quit with their popups; Updates and Credits) are short
+## enough to be drawn larger than the rest of the UI. Scale them so they look as on a 1280x720
+## screen (2/3 of design size), MainMenu around the bottom centre of its panel and AdditionalMenu
+## around the bottom left of its own, by at most what keeps the two panels apart and on screen.
+## 640x480 1.5, 720x720 1.33, 16:9 screens 1.0.
+const TITLE_MENU_TEXT_SCALE := 2.0 / 3.0
+const TITLE_MENU_MAX := 1.5
+const TITLE_MENU_GAP := 16.0
+
+func _scale_title_menus(main: Control, extra: Control) -> void:
+	if not is_instance_valid(main) or not is_instance_valid(extra):
+		return
+	var mp: Control = main.get_node_or_null("Panel")
+	var ap: Control = extra.get_node_or_null("Panel")
+	var view := main.get_viewport_rect().size
+	if not mp or not ap or mp.size.x <= 0.0 or view.x <= 0.0:
+		return
+	var shown := float(get_tree().root.size.x) / view.x  # screen pixels per design unit
+	var s := clampf(TITLE_MENU_TEXT_SCALE / shown, 1.0, TITLE_MENU_MAX)
+	# rects in the canvas, unscaled (scale and pivot do not move the layout rect)
+	var m_left := main.position.x + mp.position.x
+	var centre := m_left + mp.size.x * 0.5
+	var a_left := extra.position.x + ap.position.x
+	# both panels side by side, with a gap between them and at the right edge
+	s = minf(s, (view.x - a_left - 2.0 * TITLE_MENU_GAP) / (ap.size.x + mp.size.x))
+	s = maxf(s, 1.0)
+	extra.pivot_offset = ap.position + Vector2(0.0, ap.size.y)
+	# MainMenu stays centred if that clears AdditionalMenu, else its left edge goes right after it.
+	# Scaling around pivot x moves the panel's left edge to X + px + s * (L - px), so the pivot
+	# picks where it lands without touching the position the game lays out and animates.
+	var want_left := centre - mp.size.x * s * 0.5
+	var min_left := a_left + ap.size.x * s + TITLE_MENU_GAP
+	var px := mp.position.x + mp.size.x * 0.5
+	if want_left < min_left and s > 1.0:
+		px = (min_left - main.position.x - s * mp.position.x) / (1.0 - s)
+	main.pivot_offset = Vector2(px, mp.position.y + mp.size.y)
+	main.scale = Vector2.ONE * s
+	extra.scale = Vector2.ONE * s
+
+func _on_title_menu_added(main: Control) -> void:
+	var extra := main.get_parent().get_node_or_null("AdditionalMenu") as Control
+	if not extra:
+		return
+	var rescale := func() -> void: _scale_title_menus.call_deferred(main, extra)
+	main.resized.connect(rescale)
+	extra.resized.connect(rescale)
+	get_tree().root.size_changed.connect(rescale)
+	main.tree_exiting.connect(func() -> void: get_tree().root.size_changed.disconnect(rescale))
+	rescale.call()
+
+## The game's popups are a full screen CenterContainer holding a PanelContainer laid out at its
+## minimum size, which can be wider than a 4:3 or square screen shows with the UI scale (Key
+## Bindings is cut off at 640x480). A panel larger than the screen is scaled down and centred to
+## fit, with a small margin; smaller panels are left alone. Container layout
+## resets the scale, so the fit runs again after each sort of the CenterContainer.
+const FIT_MARGIN := 0.98
+
+func _fit_panel(panel: Control) -> void:
+	if not is_instance_valid(panel) or not panel.is_inside_tree() or not panel.get_parent() is Control:
+		return
+	# the CenterContainer grows to the panel's minimum size, so compare with what the screen shows
+	var view := panel.get_viewport_rect().size
+	if panel.size.x <= 0.0 or panel.size.y <= 0.0 or view.x <= 0.0 or view.y <= 0.0:
+		return
+	var s := minf(1.0, minf(view.x / panel.size.x, view.y / panel.size.y) * FIT_MARGIN)
+	if s > FIT_MARGIN - 0.001:
+		s = 1.0  # fits already (or within the margin)
+	# the oversized CenterContainer puts the panel off centre; pick the pivot so the scaled panel
+	# is centred on the screen: its corner lands at origin + pivot * (1 - s)
+	var origin := (panel.get_parent() as Control).global_position + panel.position
+	if s < 1.0:
+		panel.pivot_offset = ((view - panel.size * s) * 0.5 - origin) / (1.0 - s)
+	else:
+		panel.pivot_offset = panel.size * 0.5
+	panel.scale = Vector2.ONE * s
+
 func _on_node_added(node: Node) -> void:
+	if node is PanelContainer and node.get_parent() is CenterContainer:
+		# Container layout resets a child's scale to 1, so fit again after every sort
+		node.get_parent().sort_children.connect(_fit_panel.bind(node))
+		_fit_panel.call_deferred(node)
+	if node.name == "MainMenu" and node is Control and node.get_parent() and node.get_parent().name == "Canvas":
+		_on_title_menu_added.call_deferred(node)
 	var script: Script = node.get_script()
 	if script and script.resource_path == VIEWPORT_CONTAINER and node.has_signal("logic_size_changed"):
 		# connected before the game's own listeners, so they see the zoomed size
