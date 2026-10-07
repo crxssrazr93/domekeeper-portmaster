@@ -105,6 +105,17 @@ The UI scale does not reach the lobby (its game mode, loadout and keeper panels 
 
 The lobby (a ViewportContainer under `stages/loadout/MultiplayerloadoutStage.gd`) gets a larger factor of its own, 7/3 screen pixels per world pixel: 1.75 at 640x480 and 1.56 at 720x720. The value was picked by comparing 1.25, 1.5, 1.75 and 2.0 on the RG35XX H; 1.25 was still too small, and 1.75 was the choice. `DK_LOBBY_ZOOM` overrides it.
 
+### Short menus drawn larger, large popups fitted
+
+The UI scale has to keep the Options panel on screen, so short menus stay small. PortTweaks draws them larger, as they look on a 1280x720 screen (2/3 of design size), at most 1.5x: 1.5 at 640x480, 1.33 at 720x720, 1.0 on 16:9 screens.
+
+* **Title menus.** MainMenu (New Game, Options, Quit) is scaled about its bottom centre, AdditionalMenu (Updates, Credits) about its bottom left. When the two would meet, the factor is limited and MainMenu's pivot moves so its left edge lands right after AdditionalMenu (scaling about pivot p moves a corner to `origin + p * (1 - s)`). With Continue shown the row is wider, about 1.2x at 640x480.
+* **Pause menu.** `fadeIn` tweens MenuPanel's scale from 0 to 1 and slides the corner boxes in by position, so a scale on the panel is overwritten on every open. The whole `PauseMenu` CanvasLayer is scaled about the screen centre instead. Each corner box is moved back to its corner through its anchors (`a' = 0.5 + (a - 0.5) / s`) and drawn at 1/s, as it enters the tree, because the menu's own `_ready` already records the slide's start and end positions. The controls box is enlarged up to the menu's left edge. Options, tutorials and the player list are added to the same layer when opened, and get the inverse scale (pivot at the screen centre in their own coordinates), so they lay out exactly as from the title. The restart and quit confirmations are moved left when they would leave the screen.
+* **Landing screen.** Its centre text and the "Press anything to continue" hint (bottom right) are scaled about their anchors.
+* **Large popups.** Every popup is a full screen CenterContainer holding a PanelContainer at its minimum size. A panel larger than the screen (Key Bindings at 640x480) is scaled down to fit with a 2% margin. The CenterContainer grows to the panel's size, so the panel is measured against the screen and centred through its pivot, and Container layout resets a child's scale on every sort, so the fit runs again on `sort_children`.
+
+Checked on the PC at 640x480 (`tests/devtools/autorun.gd` modes `options` and `popups`, which can also call a method such as `_on_ButtonOptions_pressed` on the loaded scene) and on the RG35XX H: title, every Options category, Key Bindings and the keeper input popups, the pause menu with Options, Key Bindings and the restart confirmation, and the landing hint.
+
 The intro's two gradient backgrounds are turned 270 degrees and sized for 16:9. On 4:3 screens they end about 85 design units short of the top, and the map the intro draws underneath (layer -10, to compile the map shaders early) showed through as a blue strip above the bippinbits logo. PortTweaks lengthens them to reach the top edge.
 
 ## 5. How the problems were found
@@ -132,6 +143,9 @@ The intro's two gradient backgrounds are turned 270 degrees and sized for 16:9. 
 15. **A signal arity mismatch** in the PlayFab stub (`score_submission_failed` emitted with an argument the game's handlers do not take) caused script errors. Fixed in the stub.
 16. **UI scale, first versions**: scaling by height alone made 720x720 text smaller; keeping 720 design units of height visible (640x480 at 1.5) cut off the Options panel's Cancel and Apply row at 640x480, 480x320 and 854x480. The current formula keeps 1080 units visible.
 17. **Test harness problems**: stopping bubblewrap (which does not forward signals) and then Xwayland made Godot die on the lost X connection and raised desktop crash dialogs. The harnesses now stop Godot first, use `bwrap --die-with-parent` and `ulimit -c 0`. Starting a game before a fresh Xwayland accepted connections, or two harnesses on one display, gave black screenshots; each harness now waits for its server and takes a display from `DISP`. `pkill -f` with a literal pattern also matched the calling shell.
+
+18. **Scaling the pause menu's panel** had no effect: the menu's open animation sets its scale from 0 to 1. Moving the corner boxes after the menu's `_ready` put them off screen, because `_ready` already starts their slide in from the old positions.
+19. **Desktop crash dialogs from the PC tests**: Godot segfaults while shutting down this game (and when the landing scene is loaded on its own, outside a run). `ulimit -c 0` or `1` does not stop systemd-coredump on this kernel. The test autoload now ends the process with `OS.kill` (SIGKILL, which never dumps core) and the runner stops Godot with SIGKILL. Godot's stdout is block buffered then, so debug output goes to stderr.
 
 ## 7. On the device (Anbernic RG35XX H, Knulli)
 

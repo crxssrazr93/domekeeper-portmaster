@@ -23,6 +23,7 @@ Buttons are named as the game's prompts show them. They work by position, as SDL
 * Online services are not available. Single player is tested.
 * Set `DK_UI_SCALE` (for example `export DK_UI_SCALE=1.25`) at the top of `Dome Keeper.sh` to change the UI scale.
 * The lobby and the mine are zoomed in on small screens so their text and sprites are readable. The mine is drawn at 1.5x at 640x480 and 1.33x at 720x720. The lobby is drawn at 1.75x at 640x480 and 1.56x at 720x720. Set `DK_WORLD_ZOOM=1` (mine) or `DK_LOBBY_ZOOM=1` (lobby) the same way for the game's own wider view, or another number for a different zoom.
+* Short menus (title, pause, the landing hint) are drawn up to 1.5x larger on small screens, and popups larger than the screen (Key Bindings at 640x480) are scaled down to fit.
 * No game files are included. All patches are made on your device.
 
 ## Reporting problems
