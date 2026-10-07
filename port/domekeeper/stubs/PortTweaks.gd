@@ -543,7 +543,11 @@ func _on_pause_menu_added(layer: CanvasLayer) -> void:
 ## minimum size, which can be wider than a 4:3 or square screen shows with the UI scale (Key
 ## Bindings is cut off at 640x480). A panel larger than the screen is scaled down and centred to
 ## fit, with a small margin; smaller panels are left alone. Container layout
-## resets the scale, so the fit runs again after each sort of the CenterContainer.
+## resets the scale, so the fit runs again after each sort of the CenterContainer. The pivot that
+## centres the panel depends on where the CenterContainer is on screen, and some popups (the gadget
+## choice) are added a screen height below the view and slide in, so the fit also runs again
+## whenever the CenterContainer moves; fitted once from the start position, the gadget choice
+## ended above the screen and the game sat paused with no choice visible.
 const FIT_MARGIN := 0.98
 
 func _fit_panel(panel: Control) -> void:
@@ -571,6 +575,7 @@ func _on_node_added(node: Node) -> void:
 	if node is PanelContainer and node.get_parent() is CenterContainer:
 		# Container layout resets a child's scale to 1, so fit again after every sort
 		node.get_parent().sort_children.connect(_fit_panel.bind(node))
+		node.get_parent().item_rect_changed.connect(_fit_panel.bind(node))
 		_fit_panel.call_deferred(node)
 	if node.name == "MainMenu" and node is Control and node.get_parent() and node.get_parent().name == "Canvas":
 		_on_title_menu_added.call_deferred(node)

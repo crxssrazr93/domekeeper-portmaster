@@ -54,6 +54,72 @@ func _process(_d: float) -> void:
 		stage._startRunChoice.set_enabled(true)
 	_log("autorun: mode=relichunt dome=%s gadget=%s map=%s" % [dome, gadget, size])
 	stage.startRun()
+	if OS.has_environment("RELIC_AT"):
+		await get_tree().create_timer(float(OS.get_environment("RELIC_AT"))).timeout
+		_deliver_relic()
+
+
+# RELIC_AT=<s>: that long after the run starts, open a chamber for the keeper (the game's own
+# chamber code hands over its drop), then bring the keeper into the dome, and CHAMBER=relic floats
+# the relic into the dome. CHAMBER=gadget (default) opens the gadget choice as a delivered gadget does.
+func _deliver_relic() -> void:
+	var kind := OS.get_environment("CHAMBER") if OS.has_environment("CHAMBER") else "gadget"
+	var by_script := func(suffix: String) -> Array:
+		return get_tree().root.find_children("*", "", true, false).filter(
+			func(n): return n.get_script() and n.get_script().resource_path.ends_with(suffix))
+	var chambers: Array = by_script.call("/RelicChamber.gd" if kind == "relic" else "/GadgetChamber.gd")
+	var points: Array = by_script.call("RelicDropPoint.gd")
+	var keeper = Keepers.getAll()[0]
+	printerr("autorun: %s chambers=%d droppoints=%d" % [kind, chambers.size(), points.size()])
+	if chambers.is_empty() or points.is_empty():
+		return
+	var point: Node2D = points[0]
+	if kind == "gadget":
+		# what the dome does when a carried gadget arrives (Drop.deactivate)
+		Level.stage.queueChoice("gadget", "team1", keeper.playerId)
+	else:
+		chambers[0].registerHit(keeper.playerId)
+		await get_tree().create_timer(2.0).timeout
+		keeper.global_position = point.global_position + Vector2(0, 40)
+	if kind == "relic":
+		var relics := get_tree().get_nodes_in_group("relic")
+		if relics.is_empty():
+			return
+		relics[0].global_position = point.global_position + Vector2(0, 40)
+		await get_tree().physics_frame
+		relics[0].floatToDropTarget(point)
+	printerr("autorun: keeper in the dome")
+	for i in 20:
+		await get_tree().create_timer(1.0, true).timeout
+		var popups := get_tree().root.find_children("*", "", true, false).filter(
+			func(n): return n.get_script() and n.get_script().resource_path.ends_with("GadgetChoicePopup.gd"))
+		var info := "-"
+		if not popups.is_empty():
+			var p: Control = popups[0]
+			info = "%s vis=%s pos=%s size=%s scale=%s parent=%s/%s" % [p.name, p.is_visible_in_tree(), p.global_position, p.size, p.scale, p.get_parent().name, p.get_parent().get_class()]
+		printerr("autorun: t+%d paused=%s popup=%s" % [i, get_tree().paused, info])
+		if i == 3 and not popups.is_empty():
+			var n: Node = popups[0]
+			while n:
+				var extra := ""
+				if n is CanvasItem:
+					extra = "vis=%s mod=%s self=%s z=%d clip=%s" % [n.visible, n.modulate, n.self_modulate, n.z_index, n.clip_children]
+				if n is Control:
+					extra += " pos=%s size=%s scale=%s clipc=%s" % [n.position, n.size, n.scale, n.clip_contents]
+				if n is CanvasLayer:
+					extra = "layer=%d vis=%s xf=%s" % [n.layer, n.visible, n.transform]
+				if n is SubViewport:
+					extra = "size=%s upd=%d" % [n.size, n.render_target_update_mode]
+				printerr("autorun:   %s [%s] %s" % [n.name, n.get_class(), extra])
+				n = n.get_parent()
+			var pc: Control = popups[0].find_children("*", "PanelContainer", false, false)[0]
+			var vp := pc.get_viewport() as SubViewport
+			for f in 8:
+				printerr("autorun:   frame%d panel scale=%s pivot=%s pos=%s gpos=%s vprect=%s override=%s" % [f, pc.scale, pc.pivot_offset, pc.position, pc.get_global_transform_with_canvas().origin, pc.get_viewport_rect().size, vp.size_2d_override if vp else "-"])
+				await get_tree().process_frame
+			for c in popups[0].find_children("*", "Control", true, false).slice(0, 3):
+				printerr("autorun:   child %s [%s] vis=%s mod=%s pos=%s size=%s" % [c.name, c.get_class(), c.visible, c.modulate, c.position, c.size])
+
 
 func _log(msg: String) -> void:
 	var f := FileAccess.open(OS.get_environment("AUTORUN_LOG") if OS.has_environment("AUTORUN_LOG") else "user://autorun.log", FileAccess.WRITE)
