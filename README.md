@@ -7,6 +7,7 @@ The port runs the game's own `domekeeper.pck` on PortMaster's stock Godot 4.3 ru
 | | |
 |--|--|
 | Status | Working on an Anbernic RG35XX H (Knulli, H700, Mali G31, 1 GB RAM): sound, controls, menus and full runs |
+| Tester reports (first release) | RG40XX-H (muOS): very slow, froze when a game mode was chosen. RGB30 (ROCKNIX): crashed on New Game. R36S (dArkOS): crashed at the first movement in a run (with zram), black screen after New Game in Korean. Since then the setup no longer needs `stat` (missing on muOS), the lobby needs about half the GPU memory, a run fits in 1 GB, and Korean reaches a run; retests welcome. |
 | Target | aarch64 PortMaster devices (Knulli, muOS, ROCKNIX, ArkOS and others) with 1 GB RAM or more; x86_64 also packaged |
 | Runtimes | `godot_4.3`, Westonpack (`weston_pkg_0.2`) |
 | Tested game version | 5.0.8 (Linux and Windows pck) |
