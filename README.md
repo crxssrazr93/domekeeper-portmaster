@@ -47,6 +47,7 @@ The game ships a custom Godot 4.3.1 build with GodotSteam and PlayFab compiled i
   * the Chinese, Japanese and Korean fonts replaced by small stand-ins until one of those languages is chosen.
 * **PortTweaks** (`port/domekeeper/stubs/PortTweaks.gd`) scales the interface for small 4:3 and square screens, restores deferred text, loads the CJK fonts on demand, and shrinks a map sized render target that only one keeper (the Assessor) uses.
 * **Map shader patches** (also in PortTweaks) rewrite the game's two map shaders as they load, which took mining on a single core Mali G31 from about 20 to 28 to 30 fps without changing the picture: the rock shader's `sin()` noise reads a precomputed 256x256 tile, the rock shader skips its outline and damage work in unrevealed rock, and the cave background shader skips pixels where it is invisible. The game files are not changed, and a patch whose expected code is missing (another game version) is skipped.
+* **Fresh profile defaults** (in the launcher): offline, gamepad, 60 fps cap, and Render at Half Resolution where the world is drawn at an even number of screen pixels per art pixel, so it looks the same as full resolution (33 to 50 fps in the mine on an RG35XX H).
 * **Controller** (in the launcher): the game reads every pad itself, each as its own player, so local split screen works. The built in pad gets PortMaster's mapping for the device, renumbered for Godot's button order (pads that also report keys such as volume or Esc, like the H700 pads, are numbered differently by Godot and SDL). The mapping is passed to the game directly, because Westonpack reloads PortMaster's settings and on muOS that replaced it. A built in pad whose sticks Godot does not accept (muOS on the RG34XX-SP) gets a virtual Xbox 360 pad from `gptokeyb2 -x` instead.
 * **`godot_adpcm`** (`src/godot_adpcm/`) is a small C encoder that writes exactly the IMA ADPCM layout Godot's `AudioStreamWAV` expects, with resampling and mono folding. It ships as static aarch64 and x86_64 binaries.
 
@@ -105,7 +106,7 @@ For heap profiles, `build/build_godot_profiling.sh` builds Godot 4.3 with symbol
 * Online services (online multiplayer, leaderboards) are unavailable. Local splitscreen is untested.
 * On 480x320 screens the interface scale is capped so the Options panel still fits, which leaves small text.
 * Sound effects are at most 22 kHz, and the very large texture sheets are at half resolution.
-* On single core Mali G31 devices (H700) the mine runs at about 30 fps rather than 60. The rest of the frame time is the game's map effects; a simpler cave background was measured (at most 3 fps more, visibly less detail) and left out.
+* On single core Mali G31 devices (H700) the mine runs at about 50 fps with Render at Half Resolution (on by default where it looks the same, see below) and about 33 fps without, rather than 60. The rest of the frame time is the game's map effects; a simpler cave background was measured (at most 3 fps more, visibly less detail) and left out. The game's Simple Backgrounds and Reduced Particle Effects options change neither frame rate nor memory there.
 * ROCKNIX needs Panfrost (as for every Westonpack port).
 
 ## Credits and licenses

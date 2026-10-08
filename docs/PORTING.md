@@ -61,8 +61,8 @@ Starting a run crashed on the test device too. On Mali's vendor driver the GPU m
 
 Godot's own texture counter on the PC: lobby peak 319 MB to 164 MB, level 167 MB to 101 MB.
 
-* **Texture factor.** Textures of 512 px or more are now divided by the ratio between the 1920x1080 design and the screen (3 at 640x480, at least 2, at most 4), instead of always by 2. This was later lowered to 2 at 640x480; see "Sharp pixels" below. The launcher passes it to the setup and it is part of the setup stamp, so a different screen size redoes the textures from the original `.ctex` files, which stay in the pack.
-* **ASTC.** Colour art (more than 64 colours, no mipmaps) is halved and compressed to ASTC 4x4 with PortMaster's `astcenc.aarch64` (in the PortMaster folder on every aarch64 firmware), 1 byte per pixel instead of 4. The Mali G31 decodes it in hardware. Palette index art cannot be compressed: its colour values are palette coordinates, and any lossy change reads a different colour. 72 of the 424 scaled textures qualify.
+* **Texture factor.** Textures of 512 px or more are now divided by the ratio between the 1920x1080 design and the screen (3 at 640x480, at least 2, at most 4), instead of always by 2. This was later lowered to 2 at 640x480 (see "Sharp pixels" below), and it now applies only to the sheets over 4 MB (see "Selective texture sizes"). The launcher passes it to the setup and it is part of the setup stamp, so a different screen size redoes the textures from the original `.ctex` files, which stay in the pack.
+* **ASTC.** Colour art (more than 64 colours, no mipmaps) is compressed to ASTC 4x4 (at first at half size, now at full size, see "Selective texture sizes") with PortMaster's `astcenc.aarch64` (in the PortMaster folder on every aarch64 firmware), 1 byte per pixel instead of 4. The Mali G31 decodes it in hardware. Palette index art cannot be compressed: its colour values are palette coordinates, and any lossy change reads a different colour. 72 textures qualify.
 * **Map layers at half resolution.** `ViewportRocks`, `ViewportLights`, `ViewportBackgroundAlpha` and `ViewportCrackImpact` are map sized render targets. PortTweaks halves each one in `frame_pre_draw`, before its first draw, scales its canvas transform by 0.5 and doubles the sprites that show it. `Map.gd` places background alpha sprites at `size.x / 2`, so that viewport's canvas origin and the sprites already placed are shifted to match. `Map.gd` itself is compiled GDScript (`.gdc`) and is not changed.
 * **Render targets saved large.** `Map.tscn` saves `ViewportRocks`, `ViewportLights` and `ViewportBackgroundAlpha` at 2048x2048, and `BundleResourceTracker.tscn` its viewport at 2000x2000. Godot allocates a render target as soon as a scene is instantiated, before the game's code sets the real size, so every map (the intro's shader preload map, the lobby, the level) briefly held about 64 MB of render targets, and Godot's texture counter jumped to 300 MB on entering the lobby. The setup patches the saved size to 2x2 directly in the exported binary scenes (a `Vector2i` is its variant tag 45 and two int32, and 2048x2048 is stored once). Re-saving the scenes through Godot is not possible in the setup: their scripts need the game's autoloads to compile. The launcher's setup stamp carries a setup version, so installs prepared before this run the new step.
 * **World and UI viewports saved at 1920x1080.** `ViewportContainer.tscn` (the camera's world and UI viewports, used by the lobby and the level) and `LandingStage.tscn` save their viewports at 1920x1080; the scripts size them to the screen on the first frame. The full HD targets were allocated first, and the Mali driver kept that memory for the whole stage. Patched to 2x2 like the map scenes. A probe that logs every frame where Godot's texture memory moves by 8 MB or more, with every viewport at that moment, found them.
@@ -74,7 +74,7 @@ Godot's own texture counter on the PC: lobby peak 319 MB to 164 MB, level 167 MB
 
 * **Lazy music.** The game preloads its soundtrack. Each track under `res://content/music/` is replaced by a `LazyAudioStream` (from PM Porting Tools) that loads the real Ogg only while it plays.
 * **IMA ADPCM.** `src/godot_adpcm/godot_adpcm.c` is a port of Godot 4.3's own `_compress_ima_adpcm`: a 4 byte header per channel, low nibble first, stereo channels encoded separately and byte interleaved. Godot's encoder only exists in the editor, hence a separate tool. Sounds above 22050 Hz are resampled (windowed sinc low pass), and stereo whose side signal is 30 dB or more below the mid signal is folded to mono. `--verify` decodes the way `AudioStreamPlaybackWAV` does: SNR 26 to 49 dB on the game's samples, short UI chimes lowest. Static aarch64 and x86_64 builds give byte identical output.
-* **ScaledTexture.** Textures with a side of 512 px or more are stored at half resolution, 8192 px or more at a quarter (the texture size limit of GLES3 class Mali GPUs). `ScaledTexture` is an `ImageTexture` with `size_override`, so it reports the original size and atlas regions, frame grids and tile sets stay correct.
+* **ScaledTexture.** Textures with a side of 512 px or more that are stored smaller (exact double size art, sheets over 4 MB and sides over 8192 px, the texture size limit of GLES3 class Mali GPUs; see "Selective texture sizes") become a `ScaledTexture`. `ScaledTexture` is an `ImageTexture` with `size_override`, so it reports the original size and atlas regions, frame grids and tile sets stay correct.
 * **Palette index art.** The sprites are not colour images: shaders read `texture(palette, vec2(start_r + input.r, start_b + input.b))`, so every colour value is a coordinate into a palette. Bilinear downscaling blends coordinates into wrong colours, so images with 64 or fewer distinct colours are resized nearest neighbour. Verified by checking that scaled sheets contain no new colours.
 * **Title text.** The title screen's hidden PatchNotesPanel and CreditsPanel hold 193 labels. Hidden, they are 0 px wide, so every character wraps onto its own line (13872 lines for one label), and Godot keeps HarfBuzz buffers, ICU bidi data and glyph arrays per line: a heap peak of 401 MB settling at 261 MB. Setup saves the scene again with the text moved to `port_text` metadata, and PortTweaks restores it while a panel is visible.
 * **CJK fonts.** 36 MB of font data for Chinese, Japanese and Korean is preloaded for every language. Setup repoints those fonts to stand-ins (a small Latin font plus the real path in metadata), and PortTweaks copies the real font data into the stand-ins when one of those languages is selected.
@@ -107,7 +107,7 @@ The lobby (a ViewportContainer under `stages/loadout/MultiplayerloadoutStage.gd`
 
 **Sharp pixels.** The game looked blocky on the device. Two things drew art pixels at uneven sizes. The lobby zoom of 1.75 at 640x480 put a world pixel on 2.33 screen pixels, so neighbouring pixels came out 2 or 3 wide. And textures stored at a third of their size (factor 3) put each texel on 1.5 screen pixels in the mine. Both factors are now snapped: the zoom to the nearest whole number of screen pixels per world pixel (never below the game's own view), and the texture factor to the largest one whose texels then cover whole screen pixels.
 
-| Screen | Zoom (mine and lobby) | Screen px per art pixel | Texture factor |
+| Screen | Zoom (mine and lobby) | Screen px per art pixel | Texture factor (sheets over 4 MB) |
 |--|--|--|--|
 | 640x480 | 1.5 | 2 | 2 |
 | 720x720 | 1.33 | 2 | 2 |
@@ -197,6 +197,7 @@ H700 SoC (4 x Cortex A53), a single core Mali G31 (`/sys/class/misc/mali0/device
 | Title | 60 fps, about 400 MB |
 | Singleplayer lobby | 19 fps before the shader patches, 29 to 30 after |
 | Small map run | dome 34 fps, mining 28 to 30 fps (19 to 22 before); about 610 MB RSS with about 200 MB available |
+| Small map run, selective textures (2026-10-08) | 33 fps in the mine, 50 with Render at Half Resolution (on by default at 640x480); mine GPU about 262 MB, lowest MemAvailable about 205 MB |
 | Sound, controls, exit hotkey | working |
 
 ### Setup on the device
@@ -251,7 +252,7 @@ An existing unofficial handheld build ("Extreme Compress Mod", the stock `godot4
 
 ## 8. Still to do
 
-* Memory and frame rate in long runs and on medium to huge maps.
+* Memory and frame rate in long runs and on medium to huge maps, now with the selective texture sizes (about 75 MB more than factor 2): a late wave on a 1 GB rk3326 or rk3566 device.
 * Other devices: rk3326 and rk3566 handhelds (ArkOS, ROCKNIX with Panfrost, muOS).
 * The lobby holds about 200 MB of GPU memory and the level about 170 MB. Textures counted by Godot are 111 and 83 MB, about 37 MB of them image textures; the rest are render targets and generated textures.
 * Local splitscreen.
