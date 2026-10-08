@@ -61,7 +61,7 @@ Starting a run crashed on the test device too. On Mali's vendor driver the GPU m
 
 Godot's own texture counter on the PC: lobby peak 319 MB to 164 MB, level 167 MB to 101 MB.
 
-* **Texture factor.** Textures of 512 px or more are now divided by the ratio between the 1920x1080 design and the screen (3 at 640x480, at least 2, at most 4), instead of always by 2. The launcher passes it to the setup and it is part of the setup stamp, so a different screen size redoes the textures from the original `.ctex` files, which stay in the pack.
+* **Texture factor.** Textures of 512 px or more are now divided by the ratio between the 1920x1080 design and the screen (3 at 640x480, at least 2, at most 4), instead of always by 2. This was later lowered to 2 at 640x480; see "Sharp pixels" below. The launcher passes it to the setup and it is part of the setup stamp, so a different screen size redoes the textures from the original `.ctex` files, which stay in the pack.
 * **ASTC.** Colour art (more than 64 colours, no mipmaps) is halved and compressed to ASTC 4x4 with PortMaster's `astcenc.aarch64` (in the PortMaster folder on every aarch64 firmware), 1 byte per pixel instead of 4. The Mali G31 decodes it in hardware. Palette index art cannot be compressed: its colour values are palette coordinates, and any lossy change reads a different colour. 72 of the 424 scaled textures qualify.
 * **Map layers at half resolution.** `ViewportRocks`, `ViewportLights`, `ViewportBackgroundAlpha` and `ViewportCrackImpact` are map sized render targets. PortTweaks halves each one in `frame_pre_draw`, before its first draw, scales its canvas transform by 0.5 and doubles the sprites that show it. `Map.gd` places background alpha sprites at `size.x / 2`, so that viewport's canvas origin and the sprites already placed are shifted to match. `Map.gd` itself is compiled GDScript (`.gdc`) and is not changed.
 * **Render targets saved large.** `Map.tscn` saves `ViewportRocks`, `ViewportLights` and `ViewportBackgroundAlpha` at 2048x2048, and `BundleResourceTracker.tscn` its viewport at 2000x2000. Godot allocates a render target as soon as a scene is instantiated, before the game's code sets the real size, so every map (the intro's shader preload map, the lobby, the level) briefly held about 64 MB of render targets, and Godot's texture counter jumped to 300 MB on entering the lobby. The setup patches the saved size to 2x2 directly in the exported binary scenes (a `Vector2i` is its variant tag 45 and two int32, and 2048x2048 is stored once). Re-saving the scenes through Godot is not possible in the setup: their scripts need the game's autoloads to compile. The launcher's setup stamp carries a setup version, so installs prepared before this run the new step.
@@ -104,6 +104,23 @@ which aims for half size text, but never shows fewer than 1280x1080 design units
 The UI scale does not reach the lobby (its game mode, loadout and keeper panels are drawn in the world) or the mine. The world and each player's HUD are drawn in the SubViewports of `systems/camera/ViewportContainer.gd`, whose `size_2d_override` holds the 1920x1080 design view; at 640x480 a world pixel at the game's camera zoom of 4 covers 1.33 screen pixels, and the lobby text is a few pixels tall. The game already enlarges this view for split screen by dividing that override by 1.75. PortTweaks does the same after each resize (on `logic_size_changed`, ignoring the emits for camera zoom changes) with a factor that draws the design at least at half size, at most 1.5: 2 screen pixels per world pixel at 640x480 (1.5) and 720x720 (1.33), 1.0 on 16:9 screens. The render target sizes are unchanged, so GPU memory is the same; less of the world is in view. The lobby camera follows the keeper, so its panels come into view as the keeper moves toward them, as they already did at 4:3 without the zoom. Checked in the lobby (640x480, 720x720) and in a run on the device. `DK_WORLD_ZOOM` overrides the factor (1 = the game's view).
 
 The lobby (a ViewportContainer under `stages/loadout/MultiplayerloadoutStage.gd`) gets a larger factor of its own, 7/3 screen pixels per world pixel: 1.75 at 640x480 and 1.56 at 720x720. The value was picked by comparing 1.25, 1.5, 1.75 and 2.0 on the RG35XX H; 1.25 was still too small, and 1.75 was the choice. `DK_LOBBY_ZOOM` overrides it.
+
+**Sharp pixels.** The game looked blocky on the device. Two things drew art pixels at uneven sizes. The lobby zoom of 1.75 at 640x480 put a world pixel on 2.33 screen pixels, so neighbouring pixels came out 2 or 3 wide. And textures stored at a third of their size (factor 3) put each texel on 1.5 screen pixels in the mine. Both factors are now snapped: the zoom to the nearest whole number of screen pixels per world pixel (never below the game's own view), and the texture factor to the largest one whose texels then cover whole screen pixels.
+
+| Screen | Zoom (mine and lobby) | Screen px per art pixel | Texture factor |
+|--|--|--|--|
+| 640x480 | 1.5 | 2 | 2 |
+| 720x720 | 1.33 | 2 | 2 |
+| 1280x720 | 1.125 | 3 | 2 |
+| 480x320 | 2.0 | 2 | 4 |
+| 960x544, 1920x1080 | 1.0 | 2, 4 | 2 |
+
+Compared on the PC against the port with no texture scaling, factor 2 at 640x480 is almost identical and factor 3 is visibly blocky. Cost measured on the RG35XX H (zram on), small map:
+
+| Texture factor | Lobby GPU | Level load peak | Level GPU | Lowest MemAvailable | fps in the mine |
+|--|--|--|--|--|--|
+| 3 | 46 MB | 205 MB | 159 MB | 293 MB | 51 to 52 |
+| 2 | 68 MB | 232 MB | 196 MB | 267 MB | 51 to 52 |
 
 ### Short menus drawn larger, large popups fitted
 

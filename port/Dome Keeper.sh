@@ -76,10 +76,21 @@ file_stamp() {
 # First run (and again after the game updates its pck): adapt the user's pck to the stock
 # Godot 4.3 runtime and to 1 GB devices. setup/port_setup.gd explains every step; each one
 # skips work already done, so an interrupted run just continues next time.
-# Large textures are stored at the screen's scale of the game's 1920x1080 design: the factor is
-# 1 / min(W/1920, H/1080), rounded, from 2 to 4 (3 at 640x480 and 720x720). It is part of the
+# Large textures are stored smaller (setup/port_setup.gd): by 1 / min(W/1920, H/1080), rounded,
+# from 2 to 4, the screen's scale of the game's 1920x1080 design. The world is then drawn zoomed
+# (PortTweaks _zoom_world: half size at least, at most 1.5, snapped to whole screen pixels per
+# world pixel), so a texel can land on an uneven number of screen pixels and look blocky (3 at
+# 640x480 drew each texel 1.5 screen pixels wide). So the factor is the largest one up to that
+# whose texels cover a whole number of screen pixels at the zoom: 2 at 640x480 and 720x720,
+# 4 at 480x320 (2 screen pixels); where none does, it stays (2 at 1280x720). It is part of the
 # stamp, so another screen size prepares the textures again.
-texture_factor="$(awk -v w="${DISPLAY_WIDTH:-640}" -v h="${DISPLAY_HEIGHT:-480}" 'BEGIN { s = w / 1920; if (h / 1080 < s) s = h / 1080; f = int(1 / s + 0.5); if (f < 2) f = 2; if (f > 4) f = 4; print f }')"
+texture_factor="$(awk -v w="${DISPLAY_WIDTH:-640}" -v h="${DISPLAY_HEIGHT:-480}" 'BEGIN {
+  s = w / 1920; if (h / 1080 < s) s = h / 1080
+  z = 0.5 / s; if (z < 1) z = 1; if (z > 1.5) z = 1.5
+  base = 4 * s; px = int(base * z + 0.5); if (px < base) px = int(base + 0.999); z = px / base
+  f = int(1 / s + 0.5); if (f < 2) f = 2; if (f > 4) f = 4
+  for (c = f; c >= 2; c--) { r = s * z * c; d = r - int(r + 0.5); if (d < 0) d = -d; if (d < 0.01) { f = c; break } }
+  print f }')"
 # Colour art (not palette index art) is stored as ASTC on ARM devices, whose GPUs all decode it,
 # with PortMaster's astcenc; elsewhere it is scaled like the rest.
 texture_astc=""
@@ -236,9 +247,9 @@ port_log "starting the game, UI scale ${DK_UI_SCALE:-automatic}, world zoom ${DK
 # westonwrap replaces XDG_RUNTIME_DIR; pass the real one on so ALSA can reach PipeWire for sound.
 REAL_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # DK_UI_SCALE overrides the automatic UI scale (1.33 at 640x480 and 720x720, 1.19 at 480x320, 1.0 on 16:9 screens).
-# DK_WORLD_ZOOM overrides the automatic zoom of the mine (1.5 at 640x480, 1.33 at 720x720, 1.0 on 16:9 screens;
+# DK_WORLD_ZOOM overrides the automatic zoom of the mine (1.5 at 640x480, 1.33 at 720x720, 1.125 at 1280x720;
 # 1 = the game's own view, which shows more of the world at a smaller size). DK_LOBBY_ZOOM does the same for the
-# lobby (1.75 at 640x480, 1.56 at 720x720, 1.0 on 16:9 screens).
+# lobby (the same values, snapped to whole screen pixels per art pixel).
 $ESUDO env $weston_dir/westonwrap.sh headless noop kiosk crusty_x11egl \
   LD_PRELOAD= ${godot_mapping:+SDL_GAMECONTROLLERCONFIG="$godot_mapping"} XDG_DATA_HOME="$CONFDIR" XDG_RUNTIME_DIR="$REAL_XDG_RUNTIME_DIR" DK_UI_SCALE="${DK_UI_SCALE:-0}" DK_WORLD_ZOOM="${DK_WORLD_ZOOM:-0}" DK_LOBBY_ZOOM="${DK_LOBBY_ZOOM:-0}" \
   "$godot_dir/$godot_executable" --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" -f \

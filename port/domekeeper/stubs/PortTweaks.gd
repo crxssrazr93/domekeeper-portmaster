@@ -322,11 +322,17 @@ func _apply_ui_scale() -> void:
 ## 1.0 on 16:9 screens. The lobby (the loadout stage) is zoomed further, to 7/3 screen pixels per
 ## world pixel (1.75 at 640x480, 1.56 at 720x720, chosen on the device): its game mode, loadout
 ## and keeper panels are text drawn in the world. The render target size stays the same; less of the world is in view.
-## DK_WORLD_ZOOM and DK_LOBBY_ZOOM override the factors (1 = the game's view).
+## Both factors are then snapped so a world pixel (ART_PIXEL design pixels) covers a whole number
+## of screen pixels, the nearest one but never below the game's own view: uneven pixels (1.75 in
+## the lobby at 640x480 drew each world pixel 2 or 3 screen pixels wide) look blocky. That gives
+## 1.5 for both at 640x480, 1.33 at 720x720 and 1.125 at 1280x720 (3 screen pixels).
+## DK_WORLD_ZOOM and DK_LOBBY_ZOOM override the factors (1 = the game's view), unsnapped.
 const VIEWPORT_CONTAINER := "res://systems/camera/ViewportContainer.gd"
 const MAX_WORLD_ZOOM := 1.5
 const LOBBY_TEXT_SCALE := 7.0 / 12.0
 const MAX_LOBBY_ZOOM := 1.75
+## design pixels per world pixel: the game's camera zoom
+const ART_PIXEL := 4.0
 const LOBBY_SCRIPT := "res://stages/loadout/MultiplayerloadoutStage.gd"
 
 func _zoom_world(container: Node) -> void:
@@ -342,6 +348,9 @@ func _zoom_world(container: Node) -> void:
 	var lobby := _in_lobby(container)
 	var f := clampf((LOBBY_TEXT_SCALE if lobby else TARGET_TEXT_SCALE) / minf(shown.x, shown.y), 1.0,
 			MAX_LOBBY_ZOOM if lobby else MAX_WORLD_ZOOM)
+	var base := ART_PIXEL * minf(shown.x, shown.y)  # screen pixels per world pixel at the game's view
+	if base > 0.0:
+		f = maxf(roundf(base * f), ceilf(base - 0.001)) / base
 	var env := OS.get_environment("DK_LOBBY_ZOOM" if lobby else "DK_WORLD_ZOOM")
 	if env.is_valid_float() and env.to_float() > 0.0:
 		f = env.to_float()
