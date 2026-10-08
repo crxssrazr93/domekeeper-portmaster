@@ -89,7 +89,7 @@ func _initialize() -> void:
 	if err != OK:
 		push_error("cannot open domekeeper.pck for patching: %s" % error_string(err))
 		return
-	var ok := copy_project_data() and write_class_cache() and write_override() and convert_samples() and lazy_music() and lazy_fonts() and defer_panel_text() and small_viewports() and scale_textures()
+	var ok := copy_project_data() and write_class_cache() and write_override() and restore_missing() and convert_samples() and lazy_music() and lazy_fonts() and scale_textures() and defer_panel_text() and small_viewports()
 	pck.close()
 	if ok:
 		DirAccess.make_dir_recursive_absolute(out_dir.path_join("cache"))
@@ -155,6 +155,42 @@ func read_import(path: String) -> Array:
 	var m := re.search(text)
 	return [text, m.get_string(1) if m else ""]
 
+## Types the setup changed in .import texts, keyed by the original file's extension.
+const ORIGINAL_TYPES := {"oggvorbisstr": ['type="AudioStream"', 'type="AudioStreamOggVorbis"'],
+	"ctex": ['type="ImageTexture"', 'type="CompressedTexture2D"']}
+
+## A pack patched by an earlier setup points into cache/, next to it. When that folder is gone
+## (the port reinstalled and an already adapted domekeeper.pck copied back) every step would skip
+## those entries and the game would miss them, so they are pointed back at the original files,
+## which never leave the pack, and the steps below redo them. A cached file is named after the
+## original (WalkerDeath.wav-<md5>.sample becomes WalkerDeath.wav-<md5>.res).
+func restore_missing() -> bool:
+	var originals := {}
+	for path in pck.entries:
+		if path.begins_with("res://.godot/") and path.get_extension() in ["sample", "oggvorbisstr", "fontdata", "ctex", "scn"]:
+			originals[path.get_file().get_basename()] = path
+	var restored := 0
+	for path in pck.entries:
+		if not (path.ends_with(".import") or path.ends_with(".remap")):
+			continue
+		var imp := read_import(path)
+		var cached: String = imp[1]
+		if not cached.begins_with("res://cache/") or FileAccess.file_exists(out_dir.path_join(cached.trim_prefix("res://"))):
+			continue
+		var original: String = originals.get(cached.get_file().get_basename(), "")
+		if original == "":
+			push_error("%s points to the missing %s and its original is not in the pack" % [path, cached])
+			return false
+		var new_text: String = imp[0].replace('path="%s"' % cached, 'path="%s"' % original)
+		var types: Array = ORIGINAL_TYPES.get(original.get_extension(), [])
+		if types.size() == 2:
+			new_text = new_text.replace(types[0], types[1])
+		pck.replace(path, new_text.to_utf8_buffer())
+		restored += 1
+	if restored > 0:
+		printerr("PORT_SETUP: files missing from cache/ restored to the originals=%d" % restored)
+	return true
+
 func convert_samples() -> bool:
 	var cache := "cache/samples"
 	DirAccess.make_dir_recursive_absolute(out_dir.path_join(cache))
@@ -171,7 +207,9 @@ func convert_samples() -> bool:
 		if not imported.ends_with(".sample"):
 			skipped += 1  # already converted (points into res://cache) or unusual
 			continue
-		var wav := load(path.trim_suffix(".import")) as AudioStreamWAV
+		# the imported file itself: Godot still follows the remap it read at startup, which
+		# restore_missing may just have changed
+		var wav := load(imported) as AudioStreamWAV
 		if wav == null or wav.format != AudioStreamWAV.FORMAT_16_BITS:
 			skipped += 1
 			continue
@@ -281,7 +319,7 @@ func defer_panel_text() -> bool:
 		var imported: String = imp[1]
 		if imported.begins_with("res://cache/"):
 			continue  # done before
-		var root: Node = (load(scene_path) as PackedScene).instantiate()
+		var root: Node = (load(imported) as PackedScene).instantiate()
 		var moved := 0
 		for panel_name in DEFERRED_TEXT_SCENES[scene_path]:
 			var panel := root.find_child(panel_name, true, false)
@@ -468,7 +506,7 @@ func scale_textures() -> bool:
 			continue
 		var img := decode_ctex(imported, ctex)
 		if img == null:
-			var tex := load(path.trim_suffix(".import")) as Texture2D
+			var tex := load(imported) as Texture2D
 			img = tex.get_image() if tex else null
 		if img == null or img.is_compressed():
 			continue
