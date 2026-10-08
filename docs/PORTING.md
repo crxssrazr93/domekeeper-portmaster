@@ -122,6 +122,26 @@ Compared on the PC against the port with no texture scaling, factor 2 at 640x480
 | 3 | 46 MB | 205 MB | 159 MB | 293 MB | 51 to 52 |
 | 2 | 68 MB | 232 MB | 196 MB | 267 MB | 51 to 52 |
 
+(The fps above were measured with the game's Render at Half Resolution option on; see below.)
+
+**Selective texture sizes.** Factor 2 still made the keepers, the dome and the world backdrops look worse than the game itself: `tests/devtools/tex_stats.gd` shows that this pixel art is stored at one texel per art pixel (only 20 to 40% of the keeper sheets' 2x2 blocks are one colour), so any smaller copy drops art pixels, and nearest neighbour scaling of palette index art cannot hide that. The setup now keeps every texture at its own size, except:
+
+* textures that are exactly drawn at double or quadruple size (every 2x2 or 4x4 block one colour): stored smaller with nothing lost (23 textures);
+* textures over 4 MB as RGBA (monster, explosion, story and cave sheets, which take most of the memory and are mostly drawn at double size anyway): stored at the texture factor;
+* sides over 8192 px, which GLES3 class Mali GPUs cannot load: reduced to fit;
+* colour art on ARM devices: ASTC 4x4 at full size, the memory the half size RGBA copy took.
+
+Measured on the RG35XX H, small map, in the mine (frames per second from framebuffer flips):
+
+| Version | Half Res | fps | Title GPU | Lobby GPU | Mine GPU | Lowest MemAvailable |
+|--|--|--|--|--|--|--|
+| factor 2 | off | 33 | 68 MB | 117 MB | 191 MB | 290 MB |
+| factor 2 | on | 51 | 68 MB | 119 MB | 190 MB | 288 MB |
+| selective | off | 33 | 107 MB | 169 MB | 268 MB | 207 MB |
+| selective | on | 50 | 107 MB | 173 MB | 262 MB | 203 to 216 MB |
+
+The sharper art costs about 75 MB, no frame rate. Of the game's own options, only Render at Half Resolution changes the frame rate (33 to 50 fps); Simple Backgrounds and Reduced Particle Effects, alone or together, change neither fps (31 to 33) nor memory (within 5 MB). Where the world is drawn at an even number of screen pixels per art pixel (2 at 640x480 and 720x720), half resolution still draws every art pixel and looks the same as full resolution, so the launcher turns it on for a fresh profile there (not at 1280x720, 3 pixels). A player's own choice in Options is kept.
+
 ### Short menus drawn larger, large popups fitted
 
 The UI scale has to keep the Options panel on screen, so short menus stay small. PortTweaks draws them larger, as they look on a 1280x720 screen (2/3 of design size), at most 1.5x: 1.5 at 640x480, 1.33 at 720x720, 1.0 on 16:9 screens.

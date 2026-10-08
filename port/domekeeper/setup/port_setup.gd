@@ -24,18 +24,21 @@ extends MainLoop
 ##   fonts          the CJK fonts (36 MB of font data the game preloads for every language) are
 ##                  repointed to small stand-ins that remember the real file; PortTweaks loads
 ##                  the real data into them when a Chinese, Japanese or Korean language is chosen
-##   textures       textures with a side >= 512 px stored at the screen's scale of the 1920x1080
-##                  design (--texture-factor: 3 at 640x480, at least 2, and 4 for sides >= 8192 px,
-##                  the texture size limit of GLES3 class Mali GPUs) as ScaledTexture, which still
-##                  reports the original size so regions, frame grids and tile atlases are
-##                  unchanged. Sprites are palette index art (their colour values are coordinates
-##                  into a palette texture), so images with few distinct colours are resized
-##                  nearest neighbour; blending would produce wrong palette entries, and so would
-##                  lossy compression. Colour art (backgrounds, title images, effects) is drawn
-##                  more magnified and visibly loses detail at a third, so with --astcenc=<astcenc
-##                  binary> (ARM GPUs, which all decode ASTC) it is kept at half size and
-##                  compressed to ASTC 4x4: a quarter of the memory of RGBA, and less than a third
-##                  would take uncompressed
+##   textures       textures with a side >= 512 px, stored smaller only where that costs little:
+##                  pixel art is mostly one texel per art pixel and loses pixels when stored
+##                  smaller, so it keeps its size, unless it is already drawn at double or
+##                  quadruple size (then the smaller copy loses nothing) or is larger than 4 MB
+##                  as RGBA (monster, explosion and story sheets), which is stored at
+##                  --texture-factor (2 at 640x480, see the launcher). Sides above 8192 px, the
+##                  texture size limit of GLES3 class Mali GPUs, are always reduced to fit. The
+##                  result is a ScaledTexture, which still reports the original size so regions,
+##                  frame grids and tile atlases are unchanged. Sprites are palette index art
+##                  (their colour values are coordinates into a palette texture), so images with
+##                  few distinct colours are resized nearest neighbour; blending would produce
+##                  wrong palette entries, and so would lossy compression. Colour art
+##                  (backgrounds, title images, effects) is, with --astcenc=<astcenc binary> (ARM
+##                  GPUs, which all decode ASTC), compressed to ASTC 4x4 at full size: a quarter
+##                  of the memory of RGBA
 ## The pack is patched in place (small .import texts appended); game data never leaves it.
 
 const PckPatcher := preload("res://setup/pck_patcher.gd")
@@ -54,7 +57,8 @@ const SAMPLE_MONO_DB := 30.0  # fold to mono when L-R is this far below L+R
 const MUSIC_PREFIX := "res://content/music/"
 const TEXTURE_HALVE_FROM := 512
 const TEXTURE_FACTOR_FILE := "cache/textures/.factor"  # the factor the cached textures were made with
-const TEXTURE_QUARTER_FROM := 8192
+const TEXTURE_MAX_SIDE := 8192  # the texture size limit of GLES3 class Mali GPUs
+const TEXTURE_LARGE_BYTES := 4 * 1048576  # larger than this as RGBA: stored at the texture factor
 const TEXTURE_INDEX_MAX_COLORS := 64  # at most this many distinct colours: palette index art
 const TEXTURE_SKIP_PREFIX := "res://test/"  # developer test art, never loaded in play
 
@@ -420,6 +424,27 @@ func is_index_art(img: Image) -> bool:
 				return false
 	return true
 
+## The largest factor (4, 2 or 1) the image can be stored smaller by without losing a pixel: every
+## factor x factor block from the top left is one colour, so drawing it scaled back up with nearest
+## neighbour filtering (the game's pixel art filter) gives the original.
+## Only asked for images up to TEXTURE_LARGE_BYTES, so its copies stay small on 1 GB devices.
+func lossless_factor(img: Image) -> int:
+	var base := img
+	if img.has_mipmaps():
+		base = img.duplicate()
+		base.clear_mipmaps()
+	var w := base.get_width()
+	var h := base.get_height()
+	for f in [4, 2]:
+		if w % f != 0 or h % f != 0:
+			continue
+		var small := base.duplicate()
+		small.resize(w / f, h / f, Image.INTERPOLATE_NEAREST)
+		small.resize(w, h, Image.INTERPOLATE_NEAREST)
+		if small.get_data() == base.get_data():
+			return f
+	return 1
+
 ## The image as ASTC 4x4 (linear LDR, as Godot samples 2D textures), or null if astcenc failed.
 ## A .astc file is a 16 byte header (magic, block size, image size) and the blocks, which are
 ## exactly what Image.FORMAT_ASTC_4x4 holds.
@@ -482,7 +507,7 @@ func scale_textures() -> bool:
 	# A different factor (another screen size) redoes the textures already scaled, from the
 	# original .ctex files, which stay in the pack under their old names.
 	var factor_path := out_dir.path_join(TEXTURE_FACTOR_FILE)
-	var settings := "%d %s" % [texture_factor, "astc" if astcenc != "" else "rgba"]
+	var settings := "%d %s selective" % [texture_factor, "astc" if astcenc != "" else "rgba"]
 	var rescale := FileAccess.get_file_as_string(factor_path).strip_edges() != settings
 	for path in pck.entries:
 		if not (path.ends_with(".png.import") or path.ends_with(".jpg.import") or path.ends_with(".svg.import")) or path.begins_with(TEXTURE_SKIP_PREFIX):
@@ -513,11 +538,27 @@ func scale_textures() -> bool:
 		var index_art := is_index_art(img)
 		var had_mips: bool = img.has_mipmaps() or ctex["mipmaps"] > 0
 		var use_astc := astcenc != "" and not index_art and not had_mips
-		var factor := maxi(2 if use_astc else texture_factor, 4 if longest >= TEXTURE_QUARTER_FROM else 2)
+		# Pixel art is mostly stored at one texel per art pixel, so storing it smaller drops
+		# pixels (the keepers lost half of theirs). It keeps its size, unless it is already drawn
+		# at double size (then the smaller copy loses nothing) or is one of the few very large
+		# sheets (monsters, explosions, story images), which take most of the memory and are
+		# mostly drawn at double size anyway. Colour art becomes ASTC at full size where it can.
+		var large := size.x * size.y * 4 > TEXTURE_LARGE_BYTES
+		var lossless := 1 if large else lossless_factor(img)
+		var factor := maxi(lossless, texture_factor if large and not use_astc else 1)
+		while longest / factor > TEXTURE_MAX_SIDE:
+			factor *= 2
+		if factor == 1 and not use_astc:
+			if cached_path != "":
+				var orig_text: String = imp[0].replace('path="%s"' % cached_path, 'path="%s"' % imported)
+				pck.replace(path, orig_text.replace('type="ImageTexture"', 'type="CompressedTexture2D"').to_utf8_buffer())
+				DirAccess.remove_absolute(out_dir.path_join(cached_path.trim_prefix("res://")))
+			continue
 		if had_mips:
 			img.clear_mipmaps()
-		var filter := Image.INTERPOLATE_NEAREST if index_art else Image.INTERPOLATE_BILINEAR
-		img.resize(maxi(1, size.x / factor), maxi(1, size.y / factor), filter)
+		var filter := Image.INTERPOLATE_NEAREST if index_art or factor == lossless else Image.INTERPOLATE_BILINEAR
+		if factor > 1:
+			img.resize(maxi(1, size.x / factor), maxi(1, size.y / factor), filter)
 		if had_mips:
 			img.generate_mipmaps()
 		if use_astc:

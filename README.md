@@ -42,7 +42,7 @@ The game ships a custom Godot 4.3.1 build with GodotSteam and PlayFab compiled i
 * **First start setup** (`port/domekeeper/setup/port_setup.gd`) runs headless against your pck. It copies the project data out of the pack, writes `override.cfg`, and then rewrites the heaviest resources into a cache folder and repoints the pack's `.import` and `.remap` entries to them (the pack directory is patched in place, so nothing from the game leaves your device):
   * sound effects (708 MB as decoded PCM) re-encoded to IMA ADPCM at up to 22 kHz, stereo folded to mono when it is mono in practice (76 MB);
   * the 113 music tracks replaced by streams that load only while playing;
-  * large textures stored at half resolution, but reporting their original size so the game's layout is unchanged;
+  * only the very large textures (monster, explosion and story sheets) stored smaller, and pixel art kept at its own size so the art stays sharp; scaled textures report their original size so the game's layout is unchanged;
   * the title screen re-saved without the patch notes and credits text, which Godot otherwise shapes up front at a cost of about 140 MB; it is put back when a panel opens;
   * the Chinese, Japanese and Korean fonts replaced by small stand-ins until one of those languages is chosen.
 * **PortTweaks** (`port/domekeeper/stubs/PortTweaks.gd`) scales the interface for small 4:3 and square screens, restores deferred text, loads the CJK fonts on demand, and shrinks a map sized render target that only one keeper (the Assessor) uses.
@@ -104,7 +104,7 @@ For heap profiles, `build/build_godot_profiling.sh` builds Godot 4.3 with symbol
 
 * Online services (online multiplayer, leaderboards) are unavailable. Local splitscreen is untested.
 * On 480x320 screens the interface scale is capped so the Options panel still fits, which leaves small text.
-* Sound effects are at most 22 kHz, and large textures are at half resolution.
+* Sound effects are at most 22 kHz, and the very large texture sheets are at half resolution.
 * On single core Mali G31 devices (H700) the mine runs at about 30 fps rather than 60. The rest of the frame time is the game's map effects; a simpler cave background was measured (at most 3 fps more, visibly less detail) and left out.
 * ROCKNIX needs Panfrost (as for every Westonpack port).
 

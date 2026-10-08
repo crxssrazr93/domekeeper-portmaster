@@ -76,8 +76,10 @@ file_stamp() {
 # First run (and again after the game updates its pck): adapt the user's pck to the stock
 # Godot 4.3 runtime and to 1 GB devices. setup/port_setup.gd explains every step; each one
 # skips work already done, so an interrupted run just continues next time.
-# Large textures are stored smaller (setup/port_setup.gd): by 1 / min(W/1920, H/1080), rounded,
-# from 2 to 4, the screen's scale of the game's 1920x1080 design. The world is then drawn zoomed
+# The setup stores only the very large textures (over 4 MB as RGBA: monster, explosion and story
+# sheets) smaller; other pixel art keeps its size, since storing it smaller drops art pixels
+# (setup/port_setup.gd). The factor for those sheets is 1 / min(W/1920, H/1080), rounded, from 2
+# to 4, the screen's scale of the game's 1920x1080 design. The world is then drawn zoomed
 # (PortTweaks _zoom_world: half size at least, at most 1.5, snapped to whole screen pixels per
 # world pixel), so a texel can land on an uneven number of screen pixels and look blocky (3 at
 # 640x480 drew each texel 1.5 screen pixels wide). So the factor is the largest one up to that
@@ -96,8 +98,8 @@ texture_factor="$(awk -v w="${DISPLAY_WIDTH:-640}" -v h="${DISPLAY_HEIGHT:-480}"
 texture_astc=""
 [ "$DEVICE_ARCH" = "aarch64" ] && [ -x "$controlfolder/astcenc.aarch64" ] && texture_astc="$controlfolder/astcenc.aarch64"
 # The setup version is part of the stamp, so installs prepared by an older setup run the new steps
-# (2: map render targets saved at 2x2; 3: world and UI viewports too)
-setup_version=3
+# (2: map render targets saved at 2x2; 3: world and UI viewports too; 4: selective texture sizes)
+setup_version=4
 texture_mode="$texture_factor ${texture_astc:+astc} setup$setup_version"
 pck_stamp="$(file_stamp domekeeper.pck) $texture_mode"
 port_files domekeeper.pck override.cfg
@@ -141,10 +143,18 @@ grep -q "^run/flush_stdout_on_print" override.cfg 2>/dev/null ||
 
 # Defaults for a fresh profile: answer the online services prompt (multiplayer servers are not
 # available on this port), turn off crash reports, cap the frame rate and prefer the gamepad.
+# Where the world is drawn at an even number of screen pixels per art pixel (2 at 640x480 and
+# 720x720), the game's "Render at Half Resolution" still draws every art pixel, so it starts on:
+# 50 instead of 33 fps in the mine on an RG35XX H, same memory, no visible difference.
+half_res="$(awk -v w="${DISPLAY_WIDTH:-640}" -v h="${DISPLAY_HEIGHT:-480}" 'BEGIN {
+  s = w / 1920; if (h / 1080 < s) s = h / 1080
+  z = 0.5 / s; if (z < 1) z = 1; if (z > 1.5) z = 1.5
+  base = 4 * s; px = int(base * z + 0.5); if (px < base) px = int(base + 0.999)
+  print (px >= 2 && px % 2 == 0) ? "true" : "false" }')"
 options_dir="$CONFDIR/godot/app_userdata/Dome Keeper"
 if [ ! -f "$options_dir/options.txt" ]; then
   mkdir -p "$options_dir"
-  echo '{"onlineMultiplayerDecided":true,"allowOnlineMultiplayer":false,"allowCrashReports":false,"fullscreen":true,"vsync":true,"targetfps":60,"singleplayerUseGamepad":true}' > "$options_dir/options.txt"
+  echo '{"onlineMultiplayerDecided":true,"allowOnlineMultiplayer":false,"allowCrashReports":false,"fullscreen":true,"vsync":true,"targetfps":60,"singleplayerUseGamepad":true,"renderHalfRes":'"$half_res"'}' > "$options_dir/options.txt"
 fi
 
 # The input device a mapping line is for. By its SDL GUID first (bus, vendor, product and version,
