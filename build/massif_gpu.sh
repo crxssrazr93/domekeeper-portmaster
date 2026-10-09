@@ -9,7 +9,7 @@ R="$(cd "$(dirname "$0")/.." && pwd)"; G="$R/tests/out/game"; TAG="$1"; FRAMES="
 OUT="$R/tests/out/massif"; mkdir -p "$OUT"
 # snapshot of the port scripts, so edits made while this runs do not leak into the profile
 SNAP="$OUT/snap-$TAG"; rm -rf "$SNAP"; mkdir -p "$SNAP"; cp -r "$G/stubs" "$G/devtools" "$G/override.cfg" "$SNAP/"
-Xwayland :7 -ac -geometry "$RES" -decorate >/dev/null 2>&1 & XPID=$!
+unset WAYLAND_DISPLAY; Xvfb :7 -ac -screen 0 "$RES"x24 -nolisten tcp >/dev/null 2>&1 & XPID=$!
 sleep 2
 docker rm -f dkmassif-gpu >/dev/null 2>&1
 docker run --rm --name dkmassif-gpu --ulimit core=0 --device /dev/dri -e DISPLAY=:7 \

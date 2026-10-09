@@ -1,6 +1,6 @@
 #!/bin/bash
 # Local device-like test of Dome Keeper on the PortMaster x86_64 Godot 4.3 runtime:
-# rootful Xwayland at a handheld resolution, scripted virtual gamepad, RSS sampling.
+# an offscreen Xvfb server (no window on the desktop) at a handheld resolution, scripted virtual gamepad, RSS sampling.
 # Usage: localtest.sh <WxH> "<vpad script>" [tag] [godot binary]   (run tests/prepare.sh first)
 # Env: GODOT, DISP (X display number, default 5), FRESH=1 (fresh user data), AUTORUN=<map archetype, e.g. regular-small> and
 # AUTORUN_ARGS (devtools/autorun.gd starts a run by itself), TEXDUMP_AFTER (seconds).
@@ -12,7 +12,7 @@ GODOT="${4:-${GODOT:?set GODOT to godot43.x86_64}}"; G="${GAMEDIR:-$G}"; PCK="${
 OUT="$S/out/$TAG"; mkdir -p "$OUT"; rm -f "$OUT"/*.png "$OUT"/*.mp4 "$OUT"/diag.log "$OUT"/rss.log
 # a previous server on this display may still be shutting down; then wait until the new one answers
 while [ -e "/tmp/.X${DISP:-5}-lock" ]; do sleep 0.5; done
-Xwayland :${DISP:-5} -geometry "$RES" -decorate >/dev/null 2>&1 & XPID=$!
+unset WAYLAND_DISPLAY; Xvfb :${DISP:-5} -screen 0 "$RES"x24 -nolisten tcp >/dev/null 2>&1 & XPID=$!
 for i in $(seq 40); do DISPLAY=:${DISP:-5} xdpyinfo >/dev/null 2>&1 && break; sleep 0.5; done
 before=$(ls /dev/input/)
 REC_CMD="ffmpeg -y -loglevel error -f x11grab -framerate 30 -video_size $RES -i :${DISP:-5} -c:v libx264 -preset ultrafast $OUT/{name}.mp4" \

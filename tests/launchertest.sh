@@ -38,7 +38,7 @@ cat > "$ROOT/weston/westonwrap.sh" <<EOW
 #!/bin/bash
 [ "\$1" = cleanup ] && { echo WESTON_CLEANUP; exit 0; }
 echo "WESTONWRAP args: \$1 \$2 \$3 \$4"; shift 4
-Xwayland :${DISP:-5} -geometry ${RES_W:-640}x${RES_H:-480} -decorate >/dev/null 2>&1 & XP=\$!; sleep 2
+unset WAYLAND_DISPLAY; Xvfb :${DISP:-5} -screen 0 ${RES_W:-640}x${RES_H:-480}x24 -nolisten tcp >/dev/null 2>&1 & XP=\$!; sleep 2
 DISPLAY=:${DISP:-5} env "\$@" & GP=\$!
 wait \$GP; kill \$XP
 EOW
