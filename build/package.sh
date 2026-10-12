@@ -8,7 +8,10 @@ for a in aarch64 x86_64; do [ -x "$R/port/domekeeper/tools/godot_adpcm.$a" ] || 
 src="$R/port"
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
-cp "$src/Dome Keeper.sh" "$stage/"
+# Release zips carry the "# PORTMASTER:" line that PortMaster's own build adds; without it
+# harbourmaster inserts it into the launcher on its first runtime download, even while it runs.
+{ head -n 1 "$src/Dome Keeper.sh"; echo "# PORTMASTER: domekeeper.zip, Dome Keeper.sh"; tail -n +2 "$src/Dome Keeper.sh"; } > "$stage/Dome Keeper.sh"
+chmod 755 "$stage/Dome Keeper.sh"
 cp -r "$src/domekeeper" "$stage/"
 rm -rf "$stage"/domekeeper/*.pck "$stage/domekeeper/cache" "$stage/domekeeper/conf" "$stage/domekeeper/godot" \
   "$stage/domekeeper/override.cfg" "$stage/domekeeper/log.txt" "$stage/domekeeper/setup_log.txt" \
