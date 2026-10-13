@@ -14,8 +14,8 @@ func _log() -> void:
 	var path := _log_path()
 	var f := FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
 	f.seek_end()
-	f.store_line("DIAG static=%dMB texture=%dMB buffer=%dMB video=%dMB objects=%d nodes=%d resources=%d" % [
-		mb.call(Performance.get_monitor(Performance.MEMORY_STATIC)),
+	f.store_line("DIAG fps=%d static=%dMB texture=%dMB buffer=%dMB video=%dMB objects=%d nodes=%d resources=%d" % [
+		Engine.get_frames_per_second(), mb.call(Performance.get_monitor(Performance.MEMORY_STATIC)),
 		mb.call(Performance.get_monitor(Performance.RENDER_TEXTURE_MEM_USED)),
 		mb.call(Performance.get_monitor(Performance.RENDER_BUFFER_MEM_USED)),
 		mb.call(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)),

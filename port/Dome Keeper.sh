@@ -76,7 +76,20 @@ texture_factor="$(awk -v w="${DISPLAY_WIDTH:-640}" -v h="${DISPLAY_HEIGHT:-480}"
 texture_astc=""
 [ "$DEVICE_ARCH" = "aarch64" ] && [ -x "$controlfolder/astcenc.aarch64" ] && texture_astc="$controlfolder/astcenc.aarch64"
 setup_version=4
-texture_mode="$texture_factor ${texture_astc:+astc} setup$setup_version"
+# Under about 800 MB of RAM (a "1 GB" handheld whose firmware keeps part of it, MemTotal 662 MB on
+# the G350) the game does not fit with the full size art: the setup then also loads sound effects
+# only while they play and stores monster and effect sheets smaller. DK_LOWMEM=0 or 1 overrides.
+mem_total_mb="$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo 2>/dev/null)"
+lowmem=0
+[ "${mem_total_mb:-0}" -gt 0 ] && [ "${mem_total_mb:-0}" -lt 800 ] && lowmem=1
+case "$DK_LOWMEM" in 0|1) lowmem="$DK_LOWMEM" ;; esac
+port_log "memory profile: $([ "$lowmem" = 1 ] && echo "low memory" || echo normal) (${mem_total_mb:-unknown} MB of RAM)"
+if [ "$lowmem" = 1 ] && [ "$(awk '/^SwapTotal:/ { print $2 }' /proc/meminfo 2>/dev/null)" = 0 ]; then
+  port_log "warning: this device has no swap; with so little RAM the game may be closed by the system"
+fi
+lowmem_flag=""
+[ "$lowmem" = 1 ] && lowmem_flag="lowmem"
+texture_mode="$texture_factor ${texture_astc:+astc} setup$setup_version${lowmem_flag:+ $lowmem_flag}"
 pck_stamp="$(file_stamp domekeeper.pck) $texture_mode"
 port_files domekeeper.pck override.cfg
 if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_stamp" ]; then
@@ -85,7 +98,7 @@ else
   port_log "setup: up to date"
 fi
 if [ ! -f override.cfg ] || [ "$(cat cache/.setup_stamp 2>/dev/null)" != "$pck_stamp" ]; then
-  export GAMEDIR godot_dir godot_executable DEVICE_ARCH controlfolder texture_factor texture_astc texture_mode
+  export GAMEDIR godot_dir godot_executable DEVICE_ARCH controlfolder texture_factor texture_astc texture_mode lowmem_flag
   chmod +x "$GAMEDIR/tools/patchscript"
   export PATCHER_FILE="$GAMEDIR/tools/patchscript"
   export PATCHER_GAME="Dome Keeper"
@@ -199,10 +212,11 @@ fi
 pm_platform_helper "$godot_dir/$godot_executable"
 port_log "controller mapping for the game: ${godot_mapping:-none (Godot database)}"
 
+port_memwatch_start "$godot_executable"
 port_log "starting the game, UI scale ${DK_UI_SCALE:-automatic}, world zoom ${DK_WORLD_ZOOM:-automatic}, lobby zoom ${DK_LOBBY_ZOOM:-automatic}"
 REAL_XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 $ESUDO env $weston_dir/westonwrap.sh headless noop kiosk crusty_x11egl \
-  LD_PRELOAD= ${godot_mapping:+SDL_GAMECONTROLLERCONFIG="$godot_mapping"} XDG_DATA_HOME="$CONFDIR" XDG_RUNTIME_DIR="$REAL_XDG_RUNTIME_DIR" DK_UI_SCALE="${DK_UI_SCALE:-0}" DK_WORLD_ZOOM="${DK_WORLD_ZOOM:-0}" DK_LOBBY_ZOOM="${DK_LOBBY_ZOOM:-0}" \
+  LD_PRELOAD= ${godot_mapping:+SDL_GAMECONTROLLERCONFIG="$godot_mapping"} XDG_DATA_HOME="$CONFDIR" XDG_RUNTIME_DIR="$REAL_XDG_RUNTIME_DIR" DK_UI_SCALE="${DK_UI_SCALE:-0}" DK_WORLD_ZOOM="${DK_WORLD_ZOOM:-0}" DK_LOBBY_ZOOM="${DK_LOBBY_ZOOM:-0}" DK_LOWMEM="$lowmem" \
   "$godot_dir/$godot_executable" --resolution "${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}" -f \
   --rendering-driver opengl3_es --audio-driver ALSA --print-fps --main-pack "$GAMEDIR/domekeeper.pck"
 

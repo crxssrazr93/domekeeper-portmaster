@@ -14,6 +14,10 @@ extends MainLoop
 ##   samples        every 16-bit sound effect re-encoded as IMA ADPCM (4x smaller in RAM) into
 ##                  cache/samples/, its .import remap in the pack repointed there; above
 ##                  22050 Hz resampled down, and stereo that is really mono folded to one channel
+##   lazy samples   only with --lowmem (devices under about 800 MB of RAM): every sound effect of
+##                  16 KB or more becomes a LazyAudioStream that loads the converted sample when
+##                  it is played and drops it afterwards. The game preloads all of its sound
+##                  effects (81 MB as ADPCM); with this only the ones in use are in memory
 ##   music          every track under res://content/music/ replaced by a LazyAudioStream that
 ##                  loads the real stream only while it plays (the game preloads its soundtrack)
 ##   title scene    the title screen's hidden patch notes and credits panels hold ~200 labels
@@ -59,6 +63,10 @@ const TEXTURE_HALVE_FROM := 512
 const TEXTURE_FACTOR_FILE := "cache/textures/.factor"  # the factor the cached textures were made with
 const TEXTURE_MAX_SIDE := 8192  # the texture size limit of GLES3 class Mali GPUs
 const TEXTURE_LARGE_BYTES := 4 * 1048576  # larger than this as RGBA: stored at the texture factor
+## With --lowmem the sheets above this size are stored at the texture factor too, except the keepers'
+## (the player's own sprites keep their pixels)
+const TEXTURE_LARGE_BYTES_LOWMEM := 1 * 1048576
+const TEXTURE_LOWMEM_KEEP_PREFIX := "res://content/keeper/"
 const TEXTURE_INDEX_MAX_COLORS := 64  # at most this many distinct colours: palette index art
 const TEXTURE_SKIP_PREFIX := "res://test/"  # developer test art, never loaded in play
 
@@ -66,6 +74,7 @@ var out_dir := ""
 var encoder := ""
 var texture_factor := 2
 var astcenc := ""  # astcenc binary for colour art, or "" for none
+var lowmem := false  # a device with little RAM: see lazy_samples and scale_textures
 var pck := PckPatcher.new()
 
 # A plain MainLoop, not a SceneTree: Godot adds the project's autoloads to a SceneTree main loop
@@ -83,6 +92,8 @@ func _initialize() -> void:
 			encoder = arg.trim_prefix("--encoder=")
 		elif arg.begins_with("--astcenc="):
 			astcenc = arg.trim_prefix("--astcenc=")
+		elif arg == "--lowmem":
+			lowmem = true
 		elif arg.begins_with("--texture-factor="):
 			texture_factor = clampi(int(arg.trim_prefix("--texture-factor=")), 2, 4)
 	if out_dir == "" or encoder == "":
@@ -93,7 +104,7 @@ func _initialize() -> void:
 	if err != OK:
 		push_error("cannot open domekeeper.pck for patching: %s" % error_string(err))
 		return
-	var ok := copy_project_data() and write_class_cache() and write_override() and restore_missing() and convert_samples() and lazy_music() and lazy_fonts() and scale_textures() and defer_panel_text() and small_viewports()
+	var ok := copy_project_data() and write_class_cache() and write_override() and restore_missing() and convert_samples() and lazy_samples() and lazy_music() and lazy_fonts() and scale_textures() and defer_panel_text() and small_viewports()
 	pck.close()
 	if ok:
 		DirAccess.make_dir_recursive_absolute(out_dir.path_join("cache"))
@@ -161,6 +172,7 @@ func read_import(path: String) -> Array:
 
 ## Types the setup changed in .import texts, keyed by the original file's extension.
 const ORIGINAL_TYPES := {"oggvorbisstr": ['type="AudioStream"', 'type="AudioStreamOggVorbis"'],
+	"sample": ['type="AudioStream"', 'type="AudioStreamWAV"'],
 	"ctex": ['type="ImageTexture"', 'type="CompressedTexture2D"']}
 
 ## A pack patched by an earlier setup points into cache/, next to it. When that folder is gone
@@ -255,6 +267,59 @@ func convert_samples() -> bool:
 	DirAccess.remove_absolute(tmp_in)
 	DirAccess.remove_absolute(tmp_out)
 	printerr("PORT_SETUP: samples converted=%d skipped=%d saved=%d MB" % [done, skipped, saved / 1048576])
+	return true
+
+## Sound effects under this size stay loaded: the stand-in would cost about as much as the sample
+const LAZY_SAMPLE_MIN_BYTES := 16 * 1024
+const SAMPLE_CACHE := "res://cache/samples/"
+
+## The game preloads every sound effect in its Audio autoload and in each content script, which
+## keeps all of them in memory for the whole session (81 MB as ADPCM). With --lowmem each sound
+## effect of LAZY_SAMPLE_MIN_BYTES or more is replaced by a LazyAudioStream that loads the
+## converted sample only while it plays. Without --lowmem the stand-ins from an earlier lowmem
+## setup are pointed back at the samples, so both states can be reached from either.
+func lazy_samples() -> bool:
+	var cache := "cache/samples"
+	var done := 0
+	var undone := 0
+	for path in pck.entries:
+		if not path.ends_with(".wav.import"):
+			continue
+		var imp := read_import(path)
+		var imported: String = imp[1]
+		if not imported.begins_with(SAMPLE_CACHE):
+			continue
+		if imported.ends_with(".tres"):
+			if lowmem:
+				continue  # already lazy
+			var real := FileAccess.get_file_as_string(out_dir.path_join(imported.trim_prefix("res://")))
+			var m := RegEx.create_from_string('real_path = "([^"]+)"').search(real)
+			if m == null:
+				continue
+			var back: String = imp[0].replace('path="%s"' % imported, 'path="%s"' % m.get_string(1))
+			pck.replace(path, back.replace('type="AudioStream"', 'type="AudioStreamWAV"').to_utf8_buffer())
+			undone += 1
+			continue
+		if not lowmem or not imported.ends_with(".res"):
+			continue
+		var res_file := out_dir.path_join(imported.trim_prefix("res://"))
+		var f := FileAccess.open(res_file, FileAccess.READ)
+		if f == null or f.get_length() < LAZY_SAMPLE_MIN_BYTES:
+			continue
+		f.close()
+		var wav := load(imported) as AudioStreamWAV
+		var length := wav.get_length() if wav else 0.0
+		var name: String = imported.get_file().get_basename() + ".tres"
+		var tres := FileAccess.open(out_dir.path_join(cache + "/" + name), FileAccess.WRITE)
+		tres.store_string('[gd_resource type="AudioStream" load_steps=2 format=3]\n\n'
+			+ '[ext_resource type="Script" path="res://stubs/LazyAudioStream.gd" id="1"]\n\n'
+			+ '[resource]\nscript = ExtResource("1")\nreal_path = "%s"\nlength = %f\n' % [imported, length])
+		tres.close()
+		var new_text: String = imp[0].replace('path="%s"' % imported, 'path="%s%s"' % [SAMPLE_CACHE, name])
+		new_text = new_text.replace('type="AudioStreamWAV"', 'type="AudioStream"')
+		pck.replace(path, new_text.to_utf8_buffer())
+		done += 1
+	printerr("PORT_SETUP: lazy sound effects=%d, restored to loaded=%d" % [done, undone])
 	return true
 
 func lazy_music() -> bool:
@@ -507,7 +572,7 @@ func scale_textures() -> bool:
 	# A different factor (another screen size) redoes the textures already scaled, from the
 	# original .ctex files, which stay in the pack under their old names.
 	var factor_path := out_dir.path_join(TEXTURE_FACTOR_FILE)
-	var settings := "%d %s selective" % [texture_factor, "astc" if astcenc != "" else "rgba"]
+	var settings := "%d %s selective%s" % [texture_factor, "astc" if astcenc != "" else "rgba", " lowmem" if lowmem else ""]
 	var rescale := FileAccess.get_file_as_string(factor_path).strip_edges() != settings
 	for path in pck.entries:
 		if not (path.ends_with(".png.import") or path.ends_with(".jpg.import") or path.ends_with(".svg.import")) or path.begins_with(TEXTURE_SKIP_PREFIX):
@@ -543,7 +608,10 @@ func scale_textures() -> bool:
 		# at double size (then the smaller copy loses nothing) or is one of the few very large
 		# sheets (monsters, explosions, story images), which take most of the memory and are
 		# mostly drawn at double size anyway. Colour art becomes ASTC at full size where it can.
-		var large := size.x * size.y * 4 > TEXTURE_LARGE_BYTES
+		var large_bytes := TEXTURE_LARGE_BYTES
+		if lowmem and not path.begins_with(TEXTURE_LOWMEM_KEEP_PREFIX):
+			large_bytes = TEXTURE_LARGE_BYTES_LOWMEM
+		var large := size.x * size.y * 4 > large_bytes
 		var lossless := 1 if large else lossless_factor(img)
 		var factor := maxi(lossless, texture_factor if large and not use_astc else 1)
 		while longest / factor > TEXTURE_MAX_SIDE:

@@ -250,7 +250,49 @@ An existing unofficial handheld build ("Extreme Compress Mod", the stock `godot4
 7. PortMaster tracks a port by the line `# PORTMASTER: <zip>, <script>` at the top of its launcher. Without it, harbourmaster inserted the line into every launcher the first time it downloaded a runtime, while one of them was running, and bash then read the shifted file and stopped with a syntax error. The launcher now carries the line.
 8. A muOS tester reinstalled the port and kept the domekeeper.pck an earlier setup had already patched, without the `cache/` folder next to it. Each setup step judged its work from the pack, found its entries already pointing into `cache/` and skipped them, so the game missed about 2,000 sounds, the music, the CJK fonts and the title scene. The setup now starts with `restore_missing`: an entry that points at a missing file in `cache/` is pointed back at the original (the cached file is named after it, and the original never leaves the pack), and the usual steps redo it. Godot keeps the pack index it read at startup, so the steps load the original imported files by path rather than through the stale remap, and textures are scaled before the title scene is rebuilt, since that scene loads them. Checked on the device by removing `cache/`: 1,931 entries restored, setup 257 s, title screen with no missing files.
 
-## 8. Still to do
+## 8. Devices under 800 MB of RAM (Anbernic G350, dArkOS)
+
+A tester's G350 (RK3326, 4 x Cortex A35, Mali G31 vendor driver, kernel 4.4.189, `MemTotal` 662 MB, `MemAvailable` 530 MB before the game, 330 MB of zram swap) ran the title and intro at 35 to 52 fps, and after `Start Stage: stages/loadout/multiplayerloadout` the lobby ran at 15 to 18 fps, then at 1 fps (with ALSA underruns) for 200 s until it was killed. The setup log was fine.
+
+### What the log shows
+
+* **Setup errors are harmless.** The `SCRIPT ERROR: Compile Error: Identifier not found: ...` lines are the setup loading the title scene's scripts in a `MainLoop`, where the game's autoloads (`Options`, `Data`, `Style`, ...) do not exist (section 6, item 14). The saved `TitleStage.scn` references the same scripts by path (checked: the seven script paths are in it), and the game log of the failed run has no compile errors. `No GDExtension library found ... linux.arm64` is the two unused GDExtensions (gif exporter, Sentry) that the setup drops from the extension list.
+* **`Parameter "data.tree" is null` (28 lines).** A single burst inside the stall, not a loop: nothing is printed after it while the frame rate stays at 1. It is a game script calling `get_tree()` on a node that is not in the tree, which release builds report without a script trace. Not seen in the device reproduction below, and not the cause: the stall starts before it.
+* **The 1 fps is memory starvation.** The starved system pages the game's own code and data in and out. Swap use only rose by about 70 MB because most of the thrash is file backed pages (the game binary, libraries, the pck being read), which never touch swap.
+
+### Reproduction on the RG35XX H (Knulli)
+
+The RG35XX H has the same GPU class and 973 MB of RAM, 705 MB available. A small program that touches and `mlock`s 235 MB (`tests/device/ballast.py`, run before the game) leaves 526 MB available, as on the G350, and its zram swap is 486 MB against 330 MB. The game was started from the launcher, walked to the singleplayer lobby, and sampled every 2 seconds with `tests/device/memsample.sh` (`MemAvailable`, swap, page faults from `/proc/vmstat`, the game's RSS, frames from the framebuffer flips). The mine was reached with `tests/devtools/autorun.gd`, which reads its mode from `user://autorun.txt` on the device.
+
+| | Title | Lobby settled | Walking in the lobby | Mine |
+|--|--|--|--|--|
+| Normal profile | 140 MB available | 80 MB available, 126 MB of swap in use, 300 major faults per 2 s while loading | 10 fps, then 1 fps, recovering to 25 | not reached |
+| Low memory profile | 213 MB available | 82 MB available, 45 MB of swap, no faults once settled | dips to 12 fps for 4 s, 25 fps | 50 to 52 fps, 4 to 7 MB of swap, no faults |
+
+The normal profile collapses to 1 fps exactly as on the G350, and it recovered here only because this device's CPU and storage are faster. With no ballast the same game keeps 700 MB available and never swaps heavily. The lobby is CPU bound at about 25 fps on an H700 whichever profile runs (the stage scans its whole node tree twice per frame in `_process`), so a G350 lobby near 17 fps is its normal speed.
+
+### Low memory profile
+
+`Dome Keeper.sh` turns it on when `MemTotal` is under 800 MB (`DK_LOWMEM=0` or `1` overrides). The profile is part of the setup stamp, so it is applied by the setup (`--lowmem`), and switching in either direction runs the setup again (checked on the PC both ways: 764 stand-ins restored, textures redone).
+
+| Change | Measured on the PC (RSS with a software GL driver, so textures count) |
+|--|--|
+| Sound effects of 16 KB or more load only while they play (`lazy_samples`: a `LazyAudioStream` per sample, as for the music). The game preloads every sound effect, 81 MB as ADPCM | lobby 641 to 608 MB |
+| The intro's scene is dropped from the stage manager's `sceneCache` once the next stage runs (PortTweaks, on every device): the logo layers alone are five 2.8 MB textures | lobby 608 to 590 MB, GPU textures 226 to 204 MB |
+| Sheets over 1 MB as RGBA (instead of 4 MB) are stored at the texture factor, except `res://content/keeper/` | lobby 590 to 545 MB. On the PC the colour backgrounds are scaled too; on a device they stay ASTC at full size, so the saving there is smaller |
+| `MALLOC_ARENA_MAX=1`, and 64 KB trim and mmap thresholds | no change (547 and 549 MB), dropped |
+
+On the RG35XX H the three changes together freed 73 MB at the title and about 80 MB in the lobby (swap in use 126 MB down to 45 MB), which is the difference between collapsing and running. A run still needs the memory: with 526 MB available the mine ran at 50 fps with 4 to 7 MB of swap in use.
+
+Two more things came with it. `log.txt` now records every 15 seconds the memory left, the swap, the game's resident and swapped memory and, on Mali's vendor driver, `/sys/kernel/debug/mali0/gpu_memory` (root only), so a report shows what happened before a slowdown. And a device with no swap at all gets a warning line in the log.
+
+### Not done
+
+* Quarter size map render targets: on Mali a render target costs about 4.5 times its pixels, and the five map layers are about 80 MB on the device, but the rock and background alpha layers already sit at 4 x 4 screen pixels per texel at half size, so quarter size would be visible.
+* Lazy textures (a `Texture2D` that uploads on first draw): the engine paths that need a texture's RID (shader parameters, atlas textures, tile sets) make this too invasive for the gain.
+* ASTC 8x8 for the colour art: visibly blocky gradients in the backgrounds for about 25 MB.
+
+## 9. Still to do
 
 * Memory and frame rate in long runs and on medium to huge maps, now with the selective texture sizes (about 75 MB more than factor 2): a late wave on a 1 GB rk3326 or rk3566 device.
 * Other devices: rk3326 and rk3566 handhelds (ArkOS, ROCKNIX with Panfrost, muOS).

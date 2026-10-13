@@ -7,6 +7,24 @@ port_mem() {
   port_log "memory ($1): $(awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree):/ { printf "%s %d MB  ", $1, $2 / 1024 }' /proc/meminfo)"
 }
 
+# While the game runs, every 15 s: what is left of RAM and swap, the game's own resident and
+# swapped memory and, on Mali's vendor driver, what the GPU holds (kernel debugfs, root only).
+# A game that slows to a crawl shows here whether the system ran out of memory first. $1 is the
+# game's process name (at most 15 characters are compared).
+port_memwatch_start() {
+  local name="${1:0:15}"
+  (
+    while sleep 15; do
+      pid="$(pgrep -x "$name" 2>/dev/null | tail -n 1)"
+      [ -n "$pid" ] || continue
+      gpu=""
+      [ -r /sys/kernel/debug/mali0/gpu_memory ] && gpu=", gpu $(tr '\n' ' ' < /sys/kernel/debug/mali0/gpu_memory | tr -s ' ' | cut -c1-100)"
+      port_log "mem: $(awk '/^(MemAvailable|SwapFree):/ { printf "%s %d MB, ", $1, $2 / 1024 }' /proc/meminfo)game $(awk '/^VmRSS:/ { r = $2 } /^VmSwap:/ { s = $2 } END { printf "rss %d MB swapped %d MB", r / 1024, s / 1024 }' /proc/$pid/status 2>/dev/null)$gpu"
+    done
+  ) &
+  port_memwatch_pid=$!
+}
+
 # Kernel messages about processes killed for lack of memory, or failed GPU allocations
 port_oom_lines() {
   dmesg 2>/dev/null | grep -iE "out of memory|oom-kill|killed process|oom_reaper|panfrost.*(fail|err)|mali.*(fail|err)"
@@ -71,6 +89,10 @@ port_mounted() {
 # hotkey. A kill for lack of memory is also 137, but then the kernel logs it (caught above).
 port_exit() {
   local code oom
+  if [ -n "$port_memwatch_pid" ]; then
+    pkill -P "$port_memwatch_pid" 2>/dev/null  # its pending sleep, which would hold the log pipe open
+    kill "$port_memwatch_pid" 2>/dev/null
+  fi
   port_log "game ended after ${SECONDS}s since launch"
   port_mem exit
   oom="$(port_oom_lines | tail -n +$((port_oom_seen + 1)))"

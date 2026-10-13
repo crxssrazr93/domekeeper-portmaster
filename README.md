@@ -8,7 +8,7 @@ The port runs the game's own `domekeeper.pck` on PortMaster's stock Godot 4.3 ru
 |--|--|
 | Status | Working on an Anbernic RG35XX H (Knulli, H700, Mali G31, 1 GB RAM): sound, controls, menus and full runs |
 | Tester reports (first release) | RG40XX-H (muOS): very slow, froze when a game mode was chosen. RGB30 (ROCKNIX): crashed on New Game. R36S (dArkOS): crashed at the first movement in a run (with zram), black screen after New Game in Korean. Since then the setup no longer needs `stat` (missing on muOS), the lobby needs about half the GPU memory, a run fits in 1 GB, and Korean reaches a run. Retested on 2026-10-07: the RGB30 (ROCKNIX) now runs without crashing. |
-| Target | aarch64 PortMaster devices (Knulli, muOS, ROCKNIX, ArkOS and others) with 1 GB RAM or more; x86_64 also packaged |
+| Target | aarch64 PortMaster devices (Knulli, muOS, ROCKNIX, ArkOS and others) with 1 GB RAM or more; x86_64 also packaged. Devices that report under 800 MB of RAM (Anbernic G350: 662 MB) run a low memory profile, see docs/PORTING.md section 8 |
 | Runtimes | `godot_4.3`, Westonpack (`weston_pkg_0.2`) |
 | Tested game version | 5.0.8 (Linux and Windows pck) |
 | Performance on the RG35XX H | title 60 fps, dome 34 fps, mining 28 to 30 fps; about 400 MB at the title and about 610 MB in a small map run, with about 200 MB to spare (unmodified game: 1.2 GB at the title) |

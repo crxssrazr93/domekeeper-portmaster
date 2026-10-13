@@ -282,9 +282,30 @@ func _load_cjk_fonts() -> void:
 				font.set(prop.name, real.get(prop.name))
 		font.remove_meta("port_real_path")
 
+## The stage manager keeps the packed scene of every stage it has started, and with it all the
+## scene's textures. The intro (logo layers rasterized at 2.8 MB each, the splash screens) is
+## never started again, so its scene is dropped once the next stage is up.
+const FINISHED_STAGES := ["stages/intro/"]
+
+func _on_stage_started() -> void:
+	_drop_finished_stages.call_deferred()
+
+func _drop_finished_stages() -> void:
+	var manager := get_node_or_null("/root/StageManager")
+	if manager == null or not ("sceneCache" in manager) or not is_instance_valid(manager.currentStage):
+		return
+	var current: String = manager.currentStage.scene_file_path
+	for key in manager.sceneCache.keys():
+		for prefix in FINISHED_STAGES:
+			if str(key).begins_with(prefix) and not current.contains("/" + prefix.trim_prefix("stages/")):
+				manager.sceneCache.erase(key)
+
 func _enter_tree() -> void:
 	_patch_map_shaders()
 	get_tree().node_added.connect(_on_node_added)
+	var manager := get_node_or_null("/root/StageManager")
+	if manager and manager.has_signal("stage_started"):
+		manager.stage_started.connect(_on_stage_started)
 	RenderingServer.frame_pre_draw.connect(_halve_map_layers)
 	_apply_ui_scale()
 	get_tree().root.size_changed.connect(_apply_ui_scale)

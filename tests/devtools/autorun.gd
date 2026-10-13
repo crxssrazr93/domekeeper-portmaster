@@ -1,6 +1,7 @@
 extends Node
 # Test-only autoload: with --autorun=<regular-small|regular-medium|regular-large|regular-huge|lobby>,
-# start a run from the loadout stage as soon as it is up.
+# start a run from the loadout stage as soon as it is up. Without the argument the mode is read
+# from user://autorun.txt (for the device, where the launcher passes no arguments).
 var size := ""
 var done := false
 
@@ -8,6 +9,8 @@ func _ready() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--autorun="):
 			size = arg.trim_prefix("--autorun=")
+	if size == "" and FileAccess.file_exists("user://autorun.txt"):
+		size = FileAccess.get_file_as_string("user://autorun.txt").strip_edges()
 
 var title_done := false
 

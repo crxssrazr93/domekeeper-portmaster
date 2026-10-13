@@ -21,6 +21,7 @@ Buttons are named as the game's prompts show them. They work by position, as SDL
 ## Notes
 
 * On 1 GB devices turn on zram (or swap) in your firmware's settings, so the game does not run out of memory.
+* Devices that report less than 800 MB of RAM (a "1 GB" handheld whose firmware keeps part of it, for example 662 MB on the Anbernic G350) get a low memory profile by themselves: sound effects load only while they play, and the larger monster and effect sheets are stored smaller (the keepers keep their pixels). The first start on such a device prepares the game for that profile. Set `DK_LOWMEM=0` or `DK_LOWMEM=1` at the top of `Dome Keeper.sh` to force normal or low memory; the setup then runs again once. `log.txt` records the memory the system had left every 15 seconds while the game runs.
 * Online services are not available. Single player is tested.
 * Set `DK_UI_SCALE` (for example `export DK_UI_SCALE=1.25`) at the top of `Dome Keeper.sh` to change the UI scale.
 * The lobby and the mine are zoomed in on small screens so their text and sprites are readable. Both are drawn at 1.5x at 640x480, 1.33x at 720x720 and 1.125x at 1280x720, so each art pixel covers a whole number of screen pixels (2 or 3) and stays sharp. Set `DK_WORLD_ZOOM=1` (mine) or `DK_LOBBY_ZOOM=1` (lobby) the same way for the game's own wider view, or another number for a different zoom.
@@ -31,7 +32,7 @@ Buttons are named as the game's prompts show them. They work by position, as SDL
 
 ## Reporting problems
 
-Please send `ports/domekeeper/log.txt` and `ports/domekeeper/setup_log.txt`. `log.txt` is rewritten on every start and the run before it is kept as `log.prev.txt` (the setup log likewise), so send both if the game was started again after the problem. Lines starting with `PORT:` list the device, firmware, screen, memory and swap, the state of the setup, and at the end how long the game ran and whether the system ran out of memory.
+Please send `ports/domekeeper/log.txt` and `ports/domekeeper/setup_log.txt`. `log.txt` is rewritten on every start and the run before it is kept as `log.prev.txt` (the setup log likewise), so send both if the game was started again after the problem. Lines starting with `PORT:` list the device, firmware, screen, memory and swap, the state of the setup, the memory left every 15 seconds during the game, and at the end how long the game ran and whether the system ran out of memory.
 
 ## Thanks
 
