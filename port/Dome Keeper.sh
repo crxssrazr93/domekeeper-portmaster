@@ -28,6 +28,19 @@ mv -f "$GAMEDIR/log.txt" "$GAMEDIR/log.prev.txt" 2>/dev/null
 export PORT_REPORT_FILES="ports/domekeeper/log.txt and setup_log.txt"
 source "$GAMEDIR/tools/portlog.sh"
 port_header "Dome Keeper launcher"
+
+# build/package.sh writes the same hash of the port folder's files here and into tools/files_version.
+# A different value means this launcher and the folder come from different releases (a new launcher
+# copied over an old folder, or the reverse), which fails in confusing ways, so ask for a reinstall.
+port_files_version=a452a786
+files_version="$(cat "$GAMEDIR/tools/files_version" 2>/dev/null)"
+if [ "$files_version" != "$port_files_version" ]; then
+  port_log "port files version ${files_version:-missing}, the launcher expects $port_files_version: mixed install"
+  pm_message "The launcher and the ports/domekeeper folder come from different versions of the port. Install the port again (domekeeper.pck can stay)."
+  sleep 8
+  pm_finish
+  exit 1
+fi
 mkdir -p "$CONFDIR"
 
 if [ ! -f "$GAMEDIR/domekeeper.pck" ]; then

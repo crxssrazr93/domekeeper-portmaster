@@ -2,7 +2,7 @@
 
 Buy Dome Keeper on [Steam](https://store.steampowered.com/app/1637320/Dome_Keeper/) (the Linux build, the Windows pck also works). In Steam choose Manage, then Browse local files, and copy `domekeeper.pck` into `ports/domekeeper/`.
 
-The first start prepares the game for your device from your own pck. It takes a few minutes and needs about 350 MB of free space. Press A to begin, and A again when it finishes. It runs again by itself if the pck changes.
+The first start prepares the game for your device from your own pck. It takes a few minutes and needs about 350 MB of free space. Press A to begin, and A again when it finishes. It runs again by itself if the pck changes. If the launcher says it and the port folder come from different versions, install the port again (keep `domekeeper.pck`).
 
 ## Controls
 

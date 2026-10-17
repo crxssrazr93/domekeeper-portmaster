@@ -16,6 +16,12 @@ cp -r "$src/domekeeper" "$stage/"
 rm -rf "$stage"/domekeeper/*.pck "$stage/domekeeper/cache" "$stage/domekeeper/conf" "$stage/domekeeper/godot" \
   "$stage/domekeeper/override.cfg" "$stage/domekeeper/log.txt" "$stage/domekeeper/setup_log.txt" \
   "$stage/domekeeper/log.prev.txt" "$stage/domekeeper/setup_log.prev.txt"
+# Stamp the launcher and tools/files_version with a hash of everything the port folder ships, so the
+# launcher can tell when it runs against files from another release. Both stamps are committed.
+files_version=$(cd "$stage/domekeeper" && find . -type f ! -path ./tools/files_version | LC_ALL=C sort |
+  xargs -d '\n' md5sum | md5sum | cut -c1-8)
+echo "$files_version" | tee "$src/domekeeper/tools/files_version" > "$stage/domekeeper/tools/files_version"
+sed -i "s/^port_files_version=.*/port_files_version=$files_version/" "$src/Dome Keeper.sh" "$stage/Dome Keeper.sh"
 cp "$src/port.json" "$src/gameinfo.xml" "$src/screenshot.png" "$src/cover.png" "$stage/domekeeper/"
 cp "$src/README.md" "$stage/domekeeper/domekeeper.md"
 rm -f "$R/domekeeper.zip"
