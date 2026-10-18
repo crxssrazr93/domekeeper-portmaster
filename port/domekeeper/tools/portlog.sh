@@ -8,18 +8,29 @@ port_mem() {
 }
 
 # While the game runs, every 15 s: what is left of RAM and swap, the game's own resident and
-# swapped memory and, on Mali's vendor driver, what the GPU holds (kernel debugfs, root only).
-# A game that slows to a crawl shows here whether the system ran out of memory first. $1 is the
+# swapped memory, its CPU use (100% is one core), the pages it had to read back from disk or swap
+# (major faults) and the pages the whole system read back from swap since the last line, and on
+# Mali's vendor driver what the GPU holds (kernel debugfs, root only). A game that slows down shows
+# here whether it ran short of memory (many faults) or of CPU (high CPU use, few faults). $1 is the
 # game's process name (at most 15 characters are compared).
 port_memwatch_start() {
   local name="${1:0:15}"
   (
+    hz="$(getconf CLK_TCK 2>/dev/null || echo 100)"
+    last_pid=""
     while sleep 15; do
       pid="$(pgrep -x "$name" 2>/dev/null | tail -n 1)"
       [ -n "$pid" ] || continue
+      # after "pid (comm) ": field 10 is majflt, 12 and 13 are utime and stime in clock ticks
+      read -r flt ticks <<< "$(sed 's/^.*) //' /proc/$pid/stat 2>/dev/null | awk '{ print $10, $12 + $13 }')"
+      swpin="$(awk '/^pswpin / { print $2 }' /proc/vmstat)"
+      load=""
+      [ "$pid" = "$last_pid" ] && [ -n "$ticks" ] &&
+        load=", cpu $(( (ticks - last_ticks) * 100 / (15 * hz) ))% faults $((flt - last_flt)) swapped in $(( (swpin - last_swpin) * 4 / 1024 )) MB"
+      last_pid="$pid" last_flt="$flt" last_ticks="$ticks" last_swpin="$swpin"
       gpu=""
       [ -r /sys/kernel/debug/mali0/gpu_memory ] && gpu=", gpu $(tr '\n' ' ' < /sys/kernel/debug/mali0/gpu_memory | tr -s ' ' | cut -c1-100)"
-      port_log "mem: $(awk '/^(MemAvailable|SwapFree):/ { printf "%s %d MB, ", $1, $2 / 1024 }' /proc/meminfo)game $(awk '/^VmRSS:/ { r = $2 } /^VmSwap:/ { s = $2 } END { printf "rss %d MB swapped %d MB", r / 1024, s / 1024 }' /proc/$pid/status 2>/dev/null)$gpu"
+      port_log "mem: $(awk '/^(MemAvailable|SwapFree):/ { printf "%s %d MB, ", $1, $2 / 1024 }' /proc/meminfo)game $(awk '/^VmRSS:/ { r = $2 } /^VmSwap:/ { s = $2 } END { printf "rss %d MB swapped %d MB", r / 1024, s / 1024 }' /proc/$pid/status 2>/dev/null)$load$gpu"
     done
   ) &
   port_memwatch_pid=$!
@@ -63,6 +74,8 @@ port_header() {
     port_log "controller: $(printf '%s\n' "$SDL_GAMECONTROLLERCONFIG" | head -n 1)"
   port_pads
   port_mem start
+  # zram (compressed RAM, fast) or a swap file or partition on the SD card (slow when the game swaps)
+  port_log "swap devices: $(awk 'NR > 1 { printf "%s (%s, %d MB, priority %s) ", $1, $2, $3 / 1024, $5 }' /proc/swaps 2>/dev/null)"
   port_oom_seen=$(port_oom_lines | wc -l)
 }
 

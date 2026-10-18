@@ -269,7 +269,27 @@ The RG35XX H has the same GPU class and 973 MB of RAM, 705 MB available. A small
 | Normal profile | 140 MB available | 80 MB available, 126 MB of swap in use, 300 major faults per 2 s while loading | 10 fps, then 1 fps, recovering to 25 | not reached |
 | Low memory profile | 213 MB available | 82 MB available, 45 MB of swap, no faults once settled | dips to 12 fps for 4 s, 25 fps | 50 to 52 fps, 4 to 7 MB of swap, no faults |
 
-The normal profile collapses to 1 fps exactly as on the G350, and it recovered here only because this device's CPU and storage are faster. With no ballast the same game keeps 700 MB available and never swaps heavily. The lobby is CPU bound at about 25 fps on an H700 whichever profile runs (the stage scans its whole node tree twice per frame in `_process`), so a G350 lobby near 17 fps is its normal speed.
+The normal profile collapses to 1 fps exactly as on the G350, and it recovered here only because this device's CPU and storage are faster. With no ballast the same game keeps 700 MB available and never swaps heavily. The lobby runs at about 25 fps on an H700 whichever profile runs; the GPU is the limit there (section 7).
+
+### Second G350 report (low memory profile, 2026-10-18)
+
+With the low memory profile and no swap, the lobby left 20 MB available and the game stopped drawing frames until it was closed. With 511 MB of swap it ran, but the game itself had about 200 MB swapped out and the lobby ran at 5 to 15 fps for 12 minutes; the run was never started. The game had switched itself to Korean.
+
+Measured on the RG35XX H with the same budget (ballast to 436 MB available, 486 MB of zram, low memory profile, `tests/device/dk_locale_lobby.sh`, two runs per language, 150 s in the lobby):
+
+| Lobby, settled | Korean | English |
+|--|--|--|
+| fps | 25, 26 | 26 (one sample of 16) |
+| MemAvailable | 89, 90 MB | 86, 88 MB |
+| Game RSS | 467, 472 MB | 494, 497 MB |
+| Mali GPU memory | 242 MB | 243 MB |
+| Swapped in during 150 s | 99 to 108 MB | 148 to 159 MB |
+
+Korean costs nothing extra in the lobby, and on this device the game itself was never swapped out (`VmSwap` 0; the kernel swapped other processes). The G350 game held about 70 to 100 MB more than this, which is not explained yet. The game saves its language as it exits, so a test script that sets the language right after stopping the previous run can be overwritten by it; the `changing to` or `leaving locale at` line in `log.txt` is what counts.
+
+The stage's `_process` was suspected (two recursive `find_child` calls over about 3600 nodes per frame). Timed in the lobby (`tests/devtools/autorun.gd`, lobby mode): 0.6 ms per frame on the H700, 0.35 ms on the PC, so at most a few percent of a G350 frame. Not changed.
+
+`log.txt` now also lists the swap devices (zram, or a file or partition on the SD card) and adds to each 15 s memory line the game's CPU use, its major page faults and the system's swap ins, so the next report shows whether a slow lobby is short of memory or of CPU.
 
 ### Low memory profile
 

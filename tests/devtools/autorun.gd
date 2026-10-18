@@ -43,7 +43,12 @@ func _process(_d: float) -> void:
 		return
 	done = true
 	if size == "lobby":
-		return  # --autorun=lobby: walk into the singleplayer lobby and stay there
+		# --autorun=lobby: walk into the singleplayer lobby and stay there; after 20 s, log what the
+		# stage's _process spends per frame (MultiplayerloadoutStage.gd: two recursive find_child
+		# calls, a find_child per keeper and the hint container update)
+		await get_tree().create_timer(20.0).timeout
+		_lobby_cost(stage)
+		return
 	await get_tree().create_timer(6.0).timeout
 	stage.gameModeSelected("relichunt")
 	await get_tree().create_timer(2.0).timeout
@@ -123,6 +128,23 @@ func _deliver_relic() -> void:
 			for c in popups[0].find_children("*", "Control", true, false).slice(0, 3):
 				printerr("autorun:   child %s [%s] vis=%s mod=%s pos=%s size=%s" % [c.name, c.get_class(), c.visible, c.modulate, c.position, c.size])
 
+
+func _lobby_cost(stage: Node) -> void:
+	const N := 200
+	var t := Time.get_ticks_usec()
+	for i in N: stage.find_child("GameModeMarginContainer", true, false)
+	var a := (Time.get_ticks_usec() - t) / float(N)
+	t = Time.get_ticks_usec()
+	for i in N: stage.find_child("GameModeContainers", true, false)
+	var b := (Time.get_ticks_usec() - t) / float(N)
+	t = Time.get_ticks_usec()
+	for i in N:
+		for keeper in Keepers.local.getAll(): keeper.find_child("UseArea")
+	var c := (Time.get_ticks_usec() - t) / float(N)
+	t = Time.get_ticks_usec()
+	for i in N: stage.updateAllHintContainerPositions()
+	var d := (Time.get_ticks_usec() - t) / float(N)
+	_log("lobby cost per frame (us): find GameModeMarginContainer %.0f, find GameModeContainers %.0f, keepers UseArea %.0f, hint containers %.0f; stage nodes %d, fps %d" % [a, b, c, d, stage.find_children("*", "", true, false).size(), Engine.get_frames_per_second()])
 
 func _log(msg: String) -> void:
 	var f := FileAccess.open(OS.get_environment("AUTORUN_LOG") if OS.has_environment("AUTORUN_LOG") else "user://autorun.log", FileAccess.WRITE)
